@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Letter Rip · Print envelopes from your browser</title>
+    <meta name="description" content="Free envelope printer that runs in your browser. Type an address, pick a size from #10 to custom, choose a font, and print. Works on Chromebooks." />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="%VITE_SITE_URL%" />
+    <meta name="theme-color" content="#f7f7f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Letter Rip" />
+    <meta property="og:title" content="Letter Rip · Print envelopes from your browser" />
+    <meta property="og:description" content="Free envelope printer that runs in your browser. Type an address, pick a size from #10 to custom, choose a font, and print. Works on Chromebooks." />
+    <meta property="og:url" content="%VITE_SITE_URL%" />
+    <meta property="og:image" content="%VITE_SITE_URL%og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Letter Rip envelope monogram and wordmark: free, runs in your browser." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Letter Rip · Print envelopes from your browser" />
+    <meta name="twitter:description" content="Free envelope printer that runs in your browser. Type an address, pick a size from #10 to custom, choose a font, and print. Works on Chromebooks." />
+    <meta name="twitter:url" content="%VITE_SITE_URL%" />
+    <meta name="twitter:image" content="%VITE_SITE_URL%og.png" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "url": "%VITE_SITE_URL%",
+        "name": "Letter Rip",
+        "description": "Free envelope printer that runs in your browser. Type an address, pick a size from #10 to custom, choose a font, and print. Works on Chromebooks.",
+        "applicationCategory": "UtilityApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "featureList": [
+          "Print addressed envelopes from the browser with nothing to install",
+          "35+ envelope sizes, including #10, A2 to A10, DL, C5, square, and custom",
+          "Bundled, Google, and installed fonts with bold and italic",
+          "Per-line font size and alignment",
+          "Position nudges for pre-printed envelopes",
+          "Settings export and import",
+          "Runs on managed Chromebooks; nothing leaves the device"
+        ]
+      }
+    </script>
+    <script>
+      // Apply theme before first paint to avoid a flash.
+      try {
+        var p = JSON.parse(localStorage.getItem('mailmerge.profile') || '{}').theme || 'system';
+        var dark = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
