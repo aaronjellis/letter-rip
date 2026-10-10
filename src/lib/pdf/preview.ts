@@ -107,3 +107,43 @@ export async function renderPdfPageToCanvas(
     if (current()) pending.delete(canvas);
   }
 }
+
+export type OpenedPdf = {
+  numPages: number;
+  /**
+   * Draws page `pageNumber` (1-based) onto a new off-screen canvas at `scale` device pixels per
+   * PDF point. The caller owns the canvas. Resolves with the page size in PDF points.
+   */
+  renderPage(pageNumber: number, scale: number): Promise<{ canvas: HTMLCanvasElement; widthPt: number; heightPt: number }>;
+  /** Releases the document. The shared worker stays up. */
+  destroy(): Promise<void>;
+};
+
+/** Opens a PDF with pdf.js for page-by-page rendering, such as for printing. */
+export async function openPdf(bytes: Uint8Array): Promise<OpenedPdf> {
+  const { pdfjs, worker } = await loadPdfJs();
+  // pdf.js transfers the buffer to its worker, so hand it a copy.
+  const loading = pdfjs.getDocument({ data: bytes.slice(), worker });
+  let doc;
+  try {
+    doc = await loading.promise;
+  } catch (err) {
+    await loading.destroy();
+    throw err;
+  }
+  return {
+    numPages: doc.numPages,
+    async renderPage(pageNumber, scale) {
+      const page = await doc.getPage(pageNumber);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      await page.render({ canvas, viewport, background: '#ffffff' }).promise;
+      page.cleanup();
+      return { canvas, widthPt: base.width, heightPt: base.height };
+    },
+    destroy: () => loading.destroy(),
+  };
+}

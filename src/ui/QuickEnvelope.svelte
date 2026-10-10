@@ -5,6 +5,7 @@
   import { isRichEmpty, type RichText } from '../lib/richtext';
   import { createBrowserFontProvider } from '../lib/fonts/loader';
   import { renderPdfPageToCanvas, isRenderCancelled } from '../lib/pdf/preview';
+  import { DEFAULT_PRINT_DPI, MAX_PRINT_PAGES, PrintTooLongError, fillPrintWindow, openPrintWindow, renderPdfPagesToDataUrls } from '../lib/pdf/print-window';
   import { errorMessage } from '../lib/errors';
   import { carryRenames, includedCount, recordFromRow, type Dataset } from '../lib/merge/import';
   import { fieldKey, renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
@@ -63,6 +64,8 @@
   let warnings = $state<EnvelopeWarning[]>([]);
   let returnReplaced = $state<string[]>([]);
   let error = $state('');
+  /** Why Print took the share-sheet route on a phone; cleared on the next print. */
+  let printNote = $state('');
   let building = $state(false);
   let rendering = $state(false);
   // True once the current canvas holds a drawn page, so an empty canvas never shows.
@@ -372,12 +375,23 @@
     }, 30_000);
   }
 
-  /** Phones and tablets have no print dialog for a PDF tab; the system share sheet offers Print. */
+  /**
+   * Phones and tablets have no print dialog for a PDF tab. There, Print draws the pages as images
+   * in a new window and calls `window.print()`; the share sheet is the fallback for long lists.
+   */
   const touchDevice = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   function canShareFiles(file: File): boolean {
     return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
       && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
   }
+  function closeQuietly(win: Window) {
+    try {
+      win.close();
+    } catch {
+      // Already gone.
+    }
+  }
+  const POPUP_BLOCKED = 'Your browser blocked the new tab. Allow pop-ups for this site and try again.';
 
   async function print() {
     if (!canPrint || exporting) return;
@@ -385,11 +399,30 @@
       URL.revokeObjectURL(lastPrintUrl);
       lastPrintUrl = '';
     }
-    exporting = listMode;
+    error = '';
+    printNote = '';
+    // The print window must open now, inside the click, before anything awaits.
+    const imagePrint = touchDevice && (!listMode || printCount <= MAX_PRINT_PAGES);
+    const printWin = imagePrint ? openPrintWindow() : null;
+    if (imagePrint && !printWin) {
+      error = POPUP_BLOCKED;
+      return;
+    }
+    exporting = listMode || imagePrint;
     try {
-      error = '';
       const bytes = (await build()).bytes;
+      if (printWin) {
+        try {
+          const pages = await renderPdfPagesToDataUrls(bytes, { dpi: DEFAULT_PRINT_DPI, maxPages: MAX_PRINT_PAGES });
+          fillPrintWindow(printWin, pages);
+          return;
+        } catch (err) {
+          closeQuietly(printWin);
+          if (!(err instanceof PrintTooLongError)) throw err;
+        }
+      }
       if (touchDevice) {
+        printNote = `Lists over ${MAX_PRINT_PAGES} envelopes print through the share sheet. Choose Print there, or use Download.`;
         const file = new File([bytes as BlobPart], listMode ? 'envelopes.pdf' : 'envelope.pdf', { type: 'application/pdf' });
         if (canShareFiles(file)) {
           try {
@@ -405,7 +438,7 @@
       const win = window.open(url, '_blank');
       if (!win) {
         URL.revokeObjectURL(url);
-        error = 'Your browser blocked the new tab. Allow pop-ups for this site and try again.';
+        error = POPUP_BLOCKED;
       } else {
         // The new tab still needs the URL; it is revoked on the next print or on unmount.
         lastPrintUrl = url;
@@ -531,7 +564,10 @@
         <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the To address are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
       {/if}
       {#if touchDevice}
-        <p class="muted message status-line print-hint"><Info size={18} aria-hidden="true" /><span>On a phone or tablet, <strong>Print</strong> opens the share sheet. Choose <strong>Print</strong> there, or save the PDF and print it from your files.</span></p>
+        <p class="muted message status-line print-hint"><Info size={18} aria-hidden="true" /><span>On a phone or tablet, <strong>Print</strong> opens your device's print screen. For the PDF, use Download.</span></p>
+      {/if}
+      {#if printNote}
+        <p class="muted message status-line" aria-live="polite"><Info size={18} aria-hidden="true" /><span>{printNote}</span></p>
       {/if}
       <div class="actions">
         {#if listMode && included.length > 0}
