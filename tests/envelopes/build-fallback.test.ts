@@ -26,6 +26,8 @@ const settings: EnvelopeSettings = {
   returnAddress: plainToRich('First Church\n1 Chapel Rd'),
   returnLayout: { ...defaultReturnLayout(), font: { kind: 'bundled', id: 'lato', family: 'Lato' } },
   recipientLayout: defaultRecipientLayout(),
+  paper: { kind: 'envelope', position: 'center' },
+  rotation: 0,
 };
 
 describe('buildEnvelopePdf when a font cannot be subset', () => {

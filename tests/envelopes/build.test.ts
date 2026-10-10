@@ -2,9 +2,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { PDFDocument, PDFDict, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
+import { PDFArray, PDFDocument, PDFDict, PDFName, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
-import { buildEnvelopePdf, type EnvelopeSettings } from '../../src/lib/envelopes/build';
+import { buildEnvelopePdf, pageSizeFor, rotatePoint, type EnvelopeSettings, type Rotation } from '../../src/lib/envelopes/build';
 import { defaultRecipientLayout, defaultReturnLayout } from '../../src/lib/envelopes/layout';
 import type { AvailableFaces, FaceStyle, FontProvider, FontRef } from '../../src/lib/fonts/types';
 import { plainToRich, type RichText } from '../../src/lib/richtext';
@@ -49,6 +49,8 @@ const settings: EnvelopeSettings = {
   returnAddress: plainToRich('First Church\n1 Chapel Rd\nSpringfield, IL 62701'),
   returnLayout: defaultReturnLayout(),
   recipientLayout: defaultRecipientLayout(),
+  paper: { kind: 'envelope', position: 'center' },
+  rotation: 0,
 };
 
 const rich = (...lines: string[]): RichText => plainToRich(lines.join('\n'));
@@ -427,5 +429,185 @@ describe('buildEnvelopePdf', () => {
   it('reports no subset fallbacks for standard fonts', async () => {
     const { subsetFallbacks } = await buildEnvelopePdf([jane], settings, fixtureProvider);
     expect(subsetFallbacks).toEqual([]);
+  });
+});
+
+/** The first page's content stream operators, decoded to text. */
+async function pageContent(bytes: Uint8Array): Promise<string> {
+  const doc = await PDFDocument.load(bytes);
+  const contents = doc.getPage(0).node.Contents();
+  const refs = contents instanceof PDFArray ? contents.asArray() : contents ? [contents] : [];
+  return refs
+    .map((ref) => doc.context.lookup(ref) as PDFRawStream)
+    .map((stream) => new TextDecoder().decode(decodePDFRawStream(stream).decode()))
+    .join('\n');
+}
+
+/** Each text matrix `a b c d e f Tm` in drawing order, as numbers. */
+async function textMatrices(bytes: Uint8Array): Promise<number[][]> {
+  const content = await pageContent(bytes);
+  return [...content.matchAll(/((?:-?[\d.]+\s+){6})Tm/g)].map((m) => m[1].trim().split(/\s+/).map(Number));
+}
+
+describe('rotatePoint', () => {
+  const W = 10;
+  const H = 4;
+
+  it('maps a known point for each rotation', () => {
+    expect(rotatePoint(1, 1, W, H, 0)).toEqual({ x: 1, y: 1 });
+    expect(rotatePoint(1, 1, W, H, 90)).toEqual({ x: 3, y: 1 });
+    expect(rotatePoint(1, 1, W, H, 180)).toEqual({ x: 9, y: 3 });
+    expect(rotatePoint(1, 1, W, H, 270)).toEqual({ x: 1, y: 9 });
+  });
+
+  it('turns the canvas counterclockwise, like pdf-lib rotate', () => {
+    // The direction of the canvas's x axis after the turn: (cos r, sin r).
+    const axis = (r: Rotation) => {
+      const a = rotatePoint(0, 0, W, H, r);
+      const b = rotatePoint(1, 0, W, H, r);
+      return { x: b.x - a.x, y: b.y - a.y };
+    };
+    expect(axis(0)).toEqual({ x: 1, y: 0 });
+    expect(axis(90)).toEqual({ x: 0, y: 1 });
+    expect(axis(180)).toEqual({ x: -1, y: 0 });
+    expect(axis(270)).toEqual({ x: 0, y: -1 });
+  });
+
+  it('keeps the canvas corners inside the turned frame, from the origin', () => {
+    const corners: [number, number][] = [[0, 0], [W, 0], [0, H], [W, H]];
+    for (const r of [0, 90, 180, 270] as Rotation[]) {
+      const [tw, th] = r === 90 || r === 270 ? [H, W] : [W, H];
+      const pts = corners.map(([x, y]) => rotatePoint(x, y, W, H, r));
+      expect(Math.min(...pts.map((p) => p.x)), `r=${r}`).toBe(0);
+      expect(Math.min(...pts.map((p) => p.y)), `r=${r}`).toBe(0);
+      expect(Math.max(...pts.map((p) => p.x)), `r=${r}`).toBe(tw);
+      expect(Math.max(...pts.map((p) => p.y)), `r=${r}`).toBe(th);
+    }
+  });
+});
+
+describe('pageSizeFor', () => {
+  const num10 = { ...settings, size: 'num10' as const };
+  const num6_75 = { ...settings, size: 'num6_75' as const };
+
+  it('is the envelope itself for envelope paper', () => {
+    const l = pageSizeFor(num10);
+    expect([l.widthPt, l.heightPt]).toEqual([684, 297]);
+    expect(l.envelope).toEqual({ x: 0, y: 0, width: 684, height: 297 });
+    expect(l.exceedsPaper).toBe(false);
+  });
+
+  it('swaps the sides of a turned envelope', () => {
+    const l = pageSizeFor({ ...num10, rotation: 90 });
+    expect([l.widthPt, l.heightPt]).toEqual([297, 684]);
+    expect([l.envelopeW, l.envelopeH]).toEqual([684, 297]);
+    expect([pageSizeFor({ ...num10, rotation: 180 }).widthPt, pageSizeFor({ ...num10, rotation: 270 }).widthPt]).toEqual([684, 297]);
+  });
+
+  it('places a #6¾ at the top left, center, or right of Letter', () => {
+    const at = (position: 'left' | 'center' | 'right') => pageSizeFor({ ...num6_75, paper: { kind: 'letter', position } });
+    expect(at('left').envelope).toEqual({ x: 0, y: 531, width: 468, height: 261 });
+    expect(at('center').envelope).toEqual({ x: 72, y: 531, width: 468, height: 261 });
+    expect(at('right').envelope).toEqual({ x: 144, y: 531, width: 468, height: 261 });
+    expect([at('center').widthPt, at('center').heightPt]).toEqual([612, 792]);
+    expect(at('center').exceedsPaper).toBe(false);
+  });
+
+  it('clamps a #10 wider than Letter to the left edge and flags it', () => {
+    for (const position of ['left', 'center', 'right'] as const) {
+      const l = pageSizeFor({ ...num10, paper: { kind: 'letter', position } });
+      expect(l.envelope.x, position).toBe(0);
+      expect(l.envelope.y, position).toBe(792 - 297);
+      expect(l.exceedsPaper, position).toBe(true);
+    }
+  });
+
+  it('fits a #10 on Letter once it is turned', () => {
+    const l = pageSizeFor({ ...num10, paper: { kind: 'letter', position: 'center' }, rotation: 90 });
+    expect(l.envelope).toEqual({ x: (612 - 297) / 2, y: 792 - 684, width: 297, height: 684 });
+    expect(l.exceedsPaper).toBe(false);
+  });
+
+  it('uses portrait A4', () => {
+    const l = pageSizeFor({ ...num6_75, paper: { kind: 'a4', position: 'right' } });
+    expect([l.widthPt, l.heightPt]).toEqual([595.28, 841.89]);
+    expect(l.envelope.x).toBeCloseTo(595.28 - 468, 6);
+    expect(l.envelope.y).toBeCloseTo(841.89 - 261, 6);
+  });
+});
+
+describe('buildEnvelopePdf on printer paper', () => {
+  const num6_75: EnvelopeSettings = { ...settings, size: 'num6_75' };
+
+  it('makes a Letter page', async () => {
+    const { bytes, envelopeExceedsPaper } = await buildEnvelopePdf(
+      [jane], { ...num6_75, paper: { kind: 'letter', position: 'center' } }, fixtureProvider,
+    );
+    const { width, height } = await pageSize(bytes);
+    expect([width, height]).toEqual([612, 792]);
+    expect(envelopeExceedsPaper).toBeUndefined();
+  });
+
+  it('makes an A4 page', async () => {
+    const { bytes } = await buildEnvelopePdf([jane], { ...num6_75, paper: { kind: 'a4', position: 'left' } }, fixtureProvider);
+    const { width, height } = await pageSize(bytes);
+    expect(width).toBeCloseTo(595.28, 2);
+    expect(height).toBeCloseTo(841.89, 2);
+  });
+
+  it('moves every line by the envelope position on the sheet', async () => {
+    const base = await textMatrices((await buildEnvelopePdf([jane], num6_75, fixtureProvider)).bytes);
+    for (const [position, dx] of [['left', 0], ['center', 72], ['right', 144]] as const) {
+      const placed = await textMatrices((await buildEnvelopePdf(
+        [jane], { ...num6_75, paper: { kind: 'letter', position } }, fixtureProvider,
+      )).bytes);
+      expect(placed.length).toBe(base.length);
+      placed.forEach((m, i) => {
+        expect(m[4], `${position} x`).toBeCloseTo(base[i][4] + dx, 3);
+        expect(m[5], `${position} y`).toBeCloseTo(base[i][5] + 531, 3);
+      });
+    }
+  });
+
+  it('flags a #10 that is wider than Letter', async () => {
+    const result = await buildEnvelopePdf([jane], { ...settings, paper: { kind: 'letter', position: 'center' } }, fixtureProvider);
+    expect(result.envelopeExceedsPaper).toBe(true);
+  });
+
+  it('stands a #10 on end at 90 degrees', async () => {
+    const { bytes } = await buildEnvelopePdf([jane], { ...settings, rotation: 90 }, fixtureProvider);
+    const { width, height } = await pageSize(bytes);
+    expect(width).toBeCloseTo(297, 3);
+    expect(height).toBeCloseTo(684, 3);
+  });
+
+  it('draws turned text at the turned origin of each line', async () => {
+    const base = await textMatrices((await buildEnvelopePdf([jane], settings, fixtureProvider)).bytes);
+    const turned = await textMatrices((await buildEnvelopePdf([jane], { ...settings, rotation: 90 }, fixtureProvider)).bytes);
+    expect(turned.length).toBe(base.length);
+    turned.forEach((m, i) => {
+      const [a, b, c, d] = m;
+      expect([a, b, c, d].map((v) => Math.round(v))).toEqual([0, 1, -1, 0]);
+      const p = rotatePoint(base[i][4], base[i][5], 684, 297, 90);
+      expect(m[4]).toBeCloseTo(p.x, 3);
+      expect(m[5]).toBeCloseTo(p.y, 3);
+    });
+  });
+
+  it('draws the dashed gray outline only when asked', async () => {
+    const letter: EnvelopeSettings = { ...num6_75, paper: { kind: 'letter', position: 'center' } };
+    const plain = await pageContent((await buildEnvelopePdf([jane], letter, fixtureProvider)).bytes);
+    const outlined = await pageContent((await buildEnvelopePdf([jane], letter, fixtureProvider, { outline: true })).bytes);
+    const dash = /\]\s+[\d.]+\s+d\b/;
+    const gray = /0\.78\d*\s+0\.78\d*\s+0\.78\d*\s+RG/;
+    expect(plain).not.toMatch(dash);
+    expect(plain).not.toMatch(gray);
+    expect(outlined).toMatch(dash);
+    expect(outlined).toMatch(gray);
+    // pdf-lib moves to the corner, then strokes the rectangle's path.
+    expect(outlined).toMatch(/1 0 0 1 72 531 cm/);
+    expect(outlined).toMatch(/468 261 l/);
+    const envelopePage = await pageContent((await buildEnvelopePdf([jane], num6_75, fixtureProvider, { outline: true })).bytes);
+    expect(envelopePage).not.toMatch(dash);
   });
 });

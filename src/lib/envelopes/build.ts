@@ -1,5 +1,6 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { resolveEnvelopeSize, type EnvelopeSizeId } from './sizes';
+import { PAPER_SIZES_PT, type PaperKind, type PaperPosition, type Rotation } from './paper';
 import { layoutRichBlock, type BlockLayout, type PlacedRichLine } from './layout';
 import { sanitizeForFont } from '../pdf/text';
 import { subsetSource } from '../pdf/subset-check';
@@ -9,6 +10,8 @@ import {
 } from '../fonts/types';
 import { normalizeRich, runStyle, type RichLine, type RichText } from '../richtext';
 import { errorMessage } from '../errors';
+
+export type { PaperKind, PaperPosition, Rotation } from './paper';
 
 export type EnvelopeSettings = {
   size: EnvelopeSizeId | 'custom';
@@ -22,6 +25,13 @@ export type EnvelopeSettings = {
   returnAddress: RichText;
   returnLayout: BlockLayout;
   recipientLayout: BlockLayout;
+  /**
+   * The sheet the printer is given. 'envelope' makes the page the envelope itself; 'letter' and
+   * 'a4' place the envelope at the top of a portrait sheet, at the left, center, or right.
+   */
+  paper: { kind: PaperKind; position: PaperPosition };
+  /** Counterclockwise turn of the whole envelope, in degrees. 90 and 270 stand it on end. */
+  rotation: Rotation;
 };
 
 export type EnvelopeWarning = { block: number; replaced: string[] };
@@ -37,9 +47,76 @@ export type EnvelopePdf = {
    * corrupt their glyphs even from a padded copy (see subsetSource). For diagnostics.
    */
   subsetFallbacks: string[];
+  /** True when the envelope is wider or taller than the selected paper, so part of it is cut off. */
+  envelopeExceedsPaper?: boolean;
+};
+
+export type BuildOptions = {
+  /** Draw a light dashed outline of the envelope on a Letter or A4 sheet (for the on-screen preview). */
+  outline?: boolean;
+};
+
+/** Where the envelope sits on the printed page, in points (origin at the bottom left). */
+export type PageLayout = {
+  widthPt: number;
+  heightPt: number;
+  /** The envelope before rotation: the canvas its addresses are laid out on. */
+  envelopeW: number;
+  envelopeH: number;
+  /** The rotated envelope's rectangle on the page. */
+  envelope: { x: number; y: number; width: number; height: number };
+  /** True when the rotated envelope is wider or taller than the paper. */
+  exceedsPaper: boolean;
 };
 
 const PT_PER_IN = 72;
+const OUTLINE_GRAY = rgb(200 / 255, 200 / 255, 200 / 255);
+
+/**
+ * Where content point (x, y) of a W×H canvas lands after the canvas turns `r` degrees
+ * counterclockwise and is moved back so its new lower-left corner is the origin. The turned canvas
+ * is H×W for 90 and 270. Text drawn at the returned point with `rotate: degrees(r)` lines up with
+ * the turned canvas, because a rigid turn moves a text origin and its glyphs together.
+ */
+export function rotatePoint(x: number, y: number, W: number, H: number, r: Rotation): { x: number; y: number } {
+  switch (r) {
+    case 90: return { x: H - y, y: x };
+    case 180: return { x: W - x, y: H - y };
+    case 270: return { x: y, y: W - x };
+    default: return { x, y };
+  }
+}
+
+/**
+ * The page size and the envelope's place on it. On Letter or A4 the turned envelope's top edge
+ * meets the page top and it sits left, centered, or right. An envelope wider than the paper starts
+ * at the left edge; one taller than the paper keeps its top at the page top. Either case sets
+ * `exceedsPaper`.
+ */
+export function pageSizeFor(
+  settings: Pick<EnvelopeSettings, 'size' | 'customWidthIn' | 'customHeightIn' | 'paper' | 'rotation'>,
+): PageLayout {
+  const { widthIn, heightIn } = resolveEnvelopeSize(settings);
+  const envelopeW = widthIn * PT_PER_IN;
+  const envelopeH = heightIn * PT_PER_IN;
+  const turned = settings.rotation === 90 || settings.rotation === 270;
+  const width = turned ? envelopeH : envelopeW;
+  const height = turned ? envelopeW : envelopeH;
+  if (settings.paper.kind === 'envelope') {
+    return { widthPt: width, heightPt: height, envelopeW, envelopeH, envelope: { x: 0, y: 0, width, height }, exceedsPaper: false };
+  }
+  const sheet = PAPER_SIZES_PT[settings.paper.kind];
+  const free = sheet.width - width;
+  const x = settings.paper.position === 'left' ? 0 : settings.paper.position === 'right' ? free : free / 2;
+  return {
+    widthPt: sheet.width,
+    heightPt: sheet.height,
+    envelopeW,
+    envelopeH,
+    envelope: { x: Math.max(0, x), y: sheet.height - height, width, height },
+    exceedsPaper: width > sheet.width + 1e-6 || height > sheet.height + 1e-6,
+  };
+}
 const BLACK = rgb(0, 0, 0);
 
 type Fontkit = Parameters<PDFDocument['registerFontkit']>[0];
@@ -180,14 +257,34 @@ function placeBlock(block: PreparedBlock, layout: BlockLayout, pageW: number, pa
   }).lines;
 }
 
-function drawBlock(page: PDFPage, block: PreparedBlock, placed: PlacedRichLine[]): void {
+/** Draw a block laid out on the unturned envelope canvas, turned and placed per `layout`. */
+function drawBlock(page: PDFPage, block: PreparedBlock, placed: PlacedRichLine[], layout: PageLayout, r: Rotation): void {
+  const { envelopeW, envelopeH, envelope } = layout;
   for (const line of placed) {
     for (const run of line.runs) {
       if (run.text.trim() === '') continue;
       const font = block.fonts.get(faceKey(run.style))!;
-      page.drawText(run.text, { x: run.x, y: line.y, size: line.size, font, color: BLACK });
+      const p = rotatePoint(run.x, line.y, envelopeW, envelopeH, r);
+      page.drawText(run.text, {
+        x: envelope.x + p.x,
+        y: envelope.y + p.y,
+        size: line.size,
+        font,
+        color: BLACK,
+        ...(r === 0 ? {} : { rotate: degrees(r) }),
+      });
     }
   }
+}
+
+function drawOutline(page: PDFPage, layout: PageLayout): void {
+  const { x, y, width, height } = layout.envelope;
+  page.drawRectangle({
+    x, y, width, height,
+    borderColor: OUTLINE_GRAY,
+    borderWidth: 0.5,
+    borderDashArray: [4, 3],
+  });
 }
 
 /**
@@ -198,17 +295,22 @@ function drawBlock(page: PDFPage, block: PreparedBlock, placed: PlacedRichLine[]
  * Fonts other than the standard ones come from `fonts` and are embedded as subsets, one per face used,
  * except faces the subsetter would corrupt even after padding, which are embedded whole (listed in
  * subsetFallbacks).
+ * Addresses are laid out on the envelope as always, then the envelope is turned by
+ * settings.rotation and placed on the page from pageSizeFor. With `opts.outline` a light dashed
+ * rectangle marks the envelope on a Letter or A4 sheet (for the preview); printed PDFs leave it
+ * out, and an envelope-size page never has one.
  */
 export async function buildEnvelopePdf(
   blocks: RichText[],
   settings: EnvelopeSettings,
   fonts: FontProvider,
+  opts: BuildOptions = {},
 ): Promise<EnvelopePdf> {
   if (blocks.length === 0) throw new Error('Need at least one address block');
 
-  const { widthIn, heightIn } = resolveEnvelopeSize(settings);
-  const pageW = widthIn * PT_PER_IN;
-  const pageH = heightIn * PT_PER_IN;
+  const layout = pageSizeFor(settings);
+  const { envelopeW, envelopeH } = layout;
+  const rotation = settings.rotation;
 
   const doc = await PDFDocument.create();
   const subsetFallbacks: string[] = [];
@@ -217,17 +319,18 @@ export async function buildEnvelopePdf(
   const returnBlock = settings.showReturn
     ? await prepareBlock(settings.returnAddress, settings.returnLayout.font, fontFor)
     : null;
-  const returnPlaced = returnBlock ? placeBlock(returnBlock, settings.returnLayout, pageW, pageH) : [];
+  const returnPlaced = returnBlock ? placeBlock(returnBlock, settings.returnLayout, envelopeW, envelopeH) : [];
 
   const warnings: EnvelopeWarning[] = [];
 
   for (const [index, block] of blocks.entries()) {
-    const page = doc.addPage([pageW, pageH]);
-    if (returnBlock) drawBlock(page, returnBlock, returnPlaced);
+    const page = doc.addPage([layout.widthPt, layout.heightPt]);
+    if (opts.outline && settings.paper.kind !== 'envelope') drawOutline(page, layout);
+    if (returnBlock) drawBlock(page, returnBlock, returnPlaced, layout, rotation);
 
     if (!settings.showRecipient) continue;
     const recipient = await prepareBlock(block, settings.recipientLayout.font, fontFor);
-    drawBlock(page, recipient, placeBlock(recipient, settings.recipientLayout, pageW, pageH));
+    drawBlock(page, recipient, placeBlock(recipient, settings.recipientLayout, envelopeW, envelopeH), layout, rotation);
     if (recipient.replaced.size > 0) warnings.push({ block: index, replaced: [...recipient.replaced] });
   }
 
@@ -236,5 +339,6 @@ export async function buildEnvelopePdf(
     warnings,
     returnReplaced: returnBlock ? [...returnBlock.replaced] : [],
     subsetFallbacks,
+    ...(layout.exceedsPaper ? { envelopeExceedsPaper: true } : {}),
   };
 }

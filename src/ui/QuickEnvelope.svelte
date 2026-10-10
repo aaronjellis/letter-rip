@@ -1,7 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { resolveEnvelopeSize } from '../lib/envelopes/sizes';
-  import { buildEnvelopePdf, type EnvelopeSettings, type EnvelopeWarning } from '../lib/envelopes/build';
+  import { buildEnvelopePdf, pageSizeFor, type EnvelopeSettings, type EnvelopeWarning } from '../lib/envelopes/build';
   import { isRichEmpty, type RichText } from '../lib/richtext';
   import { createBrowserFontProvider } from '../lib/fonts/loader';
   import { renderPdfPageToCanvas, isRenderCancelled } from '../lib/pdf/preview';
@@ -11,6 +10,8 @@
   import { fieldKey, renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
   import ListDialog from './ListDialog.svelte';
   import SizePicker from './SizePicker.svelte';
+  import PaperControls from './PaperControls.svelte';
+  import PrintHelpDialog from './PrintHelpDialog.svelte';
   import BlockLayoutEditor from './BlockLayoutEditor.svelte';
   import AddressEditor from './AddressEditor.svelte';
   import Send from '@lucide/svelte/icons/send';
@@ -31,6 +32,7 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Info from '@lucide/svelte/icons/info';
+  import CircleHelp from '@lucide/svelte/icons/circle-question-mark';
 
   let { settings, onsettings, mergeTemplate, onmergetemplate }: {
     settings: EnvelopeSettings;
@@ -59,7 +61,7 @@
    * included rows whose block renders empty, and template fields with no matching column.
    */
   let mergeStats = $state.raw<{ skipped: number; unknown: string[] }>({ skipped: 0, unknown: [] });
-  // Bytes of the latest preview PDF; also what Download saves.
+  // Bytes of the latest preview PDF (outlined on a Letter or A4 sheet).
   let pdfBytes = $state.raw<Uint8Array | null>(null);
   let warnings = $state<EnvelopeWarning[]>([]);
   let returnReplaced = $state<string[]>([]);
@@ -76,6 +78,7 @@
   let stage = $state<HTMLDivElement>();
   let canvas = $state<HTMLCanvasElement>();
   let listDialog = $state<ReturnType<typeof ListDialog>>();
+  let printHelp = $state<ReturnType<typeof PrintHelpDialog>>();
   let stripEdit = $state<HTMLButtonElement>();
   // Blob URLs handed to print tabs and downloads. Not reactive: only used for cleanup.
   let lastPrintUrl = '';
@@ -127,7 +130,12 @@
           ? 'Type a To address to see your envelope.'
           : 'Type a From address to see your envelope.',
   );
-  const size = $derived(resolveEnvelopeSize(settings));
+  /** The printed page and the envelope's place on it; the preview takes the page's shape. */
+  const page = $derived(pageSizeFor(settings));
+  /** When the envelope doesn't fit the paper, whether a quarter turn would make it fit. */
+  const turnFits = $derived(
+    page.exceedsPaper && !pageSizeFor({ ...settings, rotation: settings.rotation === 0 || settings.rotation === 180 ? 90 : 0 }).exceedsPaper,
+  );
 
   // One provider for the component's lifetime so fonts load once per session.
   const fonts = createBrowserFontProvider();
@@ -273,7 +281,8 @@
       error = '';
       building = true;
       try {
-        const result = await buildEnvelopePdf([block], settings, fonts);
+        // The preview marks the envelope on a Letter or A4 sheet; Print and Download leave it out.
+        const result = await buildEnvelopePdf([block], settings, fonts, { outline: true });
         if (cancelled) return;
         warnings = result.warnings;
         returnReplaced = result.returnReplaced;
@@ -347,8 +356,10 @@
   });
 
   async function download() {
-    let bytes = pdfBytes;
-    if (listMode) {
+    // The preview's bytes carry the sheet outline, so a sheet download builds its own clean copy.
+    const outlined = settings.paper.kind !== 'envelope';
+    let bytes = outlined ? null : pdfBytes;
+    if (listMode || outlined) {
       if (!canPrint || exporting) return;
       exporting = true;
       error = '';
@@ -477,6 +488,7 @@
       </div>
     </div>
   </div>
+  <PaperControls {settings} onchange={onsettings} />
   {#if listMode}
     <!-- The list summary is one pill button that opens the list dialog, plus a small remove button. -->
     <div class="list-chip-row">
@@ -519,7 +531,8 @@
     <!-- The stage reserves the envelope's shape so the panel does not jump between renders. -->
     <!-- In list mode the preview is a keyboard-navigable carousel of records (arrow keys), so it takes focus. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div class="stage" bind:this={stage} style:aspect-ratio={`${size.widthIn} / ${size.heightIn}`}
+    <div class="stage" bind:this={stage} style:aspect-ratio={`${page.widthPt} / ${page.heightPt}`}
+      style:--page-ratio={page.widthPt / page.heightPt}
       role={listMode && included.length > 0 ? 'region' : undefined}
       aria-roledescription={listMode && included.length > 0 ? 'carousel' : undefined}
       tabindex={listMode && included.length > 0 ? 0 : undefined}
@@ -563,6 +576,9 @@
       {:else if settings.showRecipient && warnings.length > 0}
         <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the To address are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
       {/if}
+      {#if page.exceedsPaper}
+        <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>This envelope is larger than the selected paper.{turnFits ? ` Try Rotate ${settings.rotation === 0 || settings.rotation === 180 ? '90°' : '0°'}.` : ''}</span></p>
+      {/if}
       {#if touchDevice}
         <p class="muted message status-line print-hint"><Info size={18} aria-hidden="true" /><span>On a phone or tablet, <strong>Print</strong> opens your device's print screen. For the PDF, use Download.</span></p>
       {/if}
@@ -583,6 +599,8 @@
           <Download size={20} aria-hidden="true" />
           <span class="btn-label">{listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}</span>
         </button>
+        <button type="button" class="help-btn" aria-label="Printing help" title="Printing help" aria-haspopup="dialog"
+          onclick={(e) => printHelp?.open(e.currentTarget)}><CircleHelp size={22} aria-hidden="true" /></button>
         <!-- Outside the form, so it submits it through the form attribute. -->
         <button class="btn btn-primary" type="submit" form="envelope-form" disabled={!canPrint || exporting}>
           {#if exporting}<LoaderCircle class="spin" size={20} aria-hidden="true" />{:else}<Printer size={20} aria-hidden="true" />{/if}
@@ -685,6 +703,7 @@
 
 <!-- Outside the form, so Enter in the list's controls never submits it (which prints). -->
 <ListDialog bind:this={listDialog} {dataset} onchange={onDataset} />
+<PrintHelpDialog bind:this={printHelp} {settings} {touchDevice} />
 
 <style>
   /*
@@ -750,6 +769,8 @@
     .mode-short { display: inline; }
   }
   .envelope-controls :global(.size-picker) { flex: 1 1 200px; min-width: 0; max-width: 360px; }
+  /* Printer paper row: quieter, under the mode and size, separated by a hairline. */
+  .envelope-card :global(.paper-controls) { padding-top: 16px; border-top: 1px solid var(--divider); }
   .segmented.mode { padding: 3px; gap: 3px; }
   .segmented.mode button { min-height: 40px; padding: 0 14px; gap: 8px; font-size: 14px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
@@ -813,6 +834,12 @@
   .btn-label-short { display: none; }
   /* Record stepper sits at the bottom left, opposite the primary actions. */
   .actions .stepper { margin-right: auto; }
+  /* Printing help: a quiet 48px circle beside Print. */
+  .help-btn {
+    flex: none; width: 48px; min-height: 48px; padding: 0;
+    border-color: transparent; background: transparent; color: var(--muted);
+  }
+  .help-btn:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
   .message { margin: 0; font-size: 14px; }
   .message :global(.lucide-triangle-alert) { color: #b4690e; }
   :global(:root[data-theme='dark']) .message :global(.lucide-triangle-alert) { color: #f5b25b; }
@@ -846,7 +873,11 @@
   .message :global(.lucide-info) { color: var(--muted); }
 
   /* The envelope scales with the card but stops at 720px wide so a #10 never gets too tall. */
-  .stage { display: grid; place-items: center; width: 100%; max-width: 720px; justify-self: center; min-width: 0; }
+  /* A portrait sheet or a turned envelope stops at about 640px tall, so the preview fits the screen. */
+  .stage {
+    display: grid; place-items: center; width: 100%; justify-self: center; min-width: 0;
+    max-width: min(720px, calc(var(--page-ratio, 2) * min(70vh, 640px)));
+  }
   canvas, .blank {
     border: 1px solid var(--divider);
     border-radius: var(--radius-sm);

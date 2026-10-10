@@ -1,4 +1,5 @@
 import type { EnvelopeSettings } from '../envelopes/build';
+import { PAPER_KINDS, PAPER_POSITIONS, ROTATIONS, type Rotation } from '../envelopes/paper';
 import { DEFAULT_ENVELOPE_SIZE, ENVELOPE_SIZES, clampCustomInches, getEnvelopeSize } from '../envelopes/sizes';
 import {
   defaultRecipientLayout, defaultReturnLayout, type BlockLayout, type HAnchor, type VAnchor,
@@ -22,9 +23,10 @@ export type LetterTemplate = { id: string; name: string; html: string };
 
 /**
  * Version 3 files may lack `mergeTemplate` (it was added without a version bump); they get the
- * default template, as do migrated version 1 and 2 files.
+ * default template, as do migrated version 1 and 2 files. Version 4 added the envelope's printer
+ * paper and rotation; older files get the defaults.
  */
-export const PROFILE_VERSION = 3;
+export const PROFILE_VERSION = 4;
 
 /** The merge template a new profile starts with. */
 const DEFAULT_MERGE_TEMPLATE = '{{Name}}\n{{Address}}\n{{City}}, {{State}} {{Zip}}';
@@ -83,6 +85,8 @@ export function defaultProfile(): Profile {
       returnAddress: { lines: [] },
       returnLayout: defaultReturnLayout(),
       recipientLayout: defaultRecipientLayout(),
+      paper: { kind: 'envelope', position: 'center' },
+      rotation: 0,
     },
     label: { product: '5160', startAt: 1, font: 'sans', fontSize: 10 },
     letters: [],
@@ -116,7 +120,7 @@ export function serializeProfile(profile: Profile): string {
 }
 
 /**
- * Parse an exported layout file. Older versions migrate step by step: 1 → 2 → 3.
+ * Parse an exported layout file. Older versions migrate step by step: 1 → 2 → 3 → 4.
  * Missing sections fall back to defaults; invalid fields fall back one at a time.
  * A missing `mergeTemplate` gets the default; one that is present is validated as rich text.
  */
@@ -133,6 +137,7 @@ export function parseProfile(text: string): Profile {
   let obj = data;
   if (obj.version === 1) obj = migrateV1(obj);
   if (obj.version === 2) obj = migrateV2(obj);
+  if (obj.version === 3) obj = migrateV3(obj);
   if (obj.version !== PROFILE_VERSION) {
     throw new Error(`Unsupported layout file version: ${String(obj.version)}`);
   }
@@ -188,6 +193,16 @@ function migrateV2(obj: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+/**
+ * Turn a version 3 file into version 4 data (still unvalidated).
+ * v3 had no printer paper or rotation, so the envelope keeps printing on its own size, unturned.
+ */
+function migrateV3(obj: Record<string, unknown>): Record<string, unknown> {
+  if (!isObj(obj.envelope)) return { ...obj, version: 4 };
+  const d = defaultProfile().envelope;
+  return { ...obj, version: 4, envelope: { ...obj.envelope, paper: d.paper, rotation: d.rotation } };
+}
+
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -210,6 +225,10 @@ function parseEnvelope(v: Record<string, unknown>, d: EnvelopeSettings): Envelop
     returnAddress: v.returnAddress === undefined ? d.returnAddress : parseRichText(v.returnAddress),
     returnLayout: parseLayout(v.returnLayout, d.returnLayout),
     recipientLayout: parseLayout(v.recipientLayout, d.recipientLayout),
+    paper: isObj(v.paper)
+      ? { kind: oneOf(v.paper.kind, PAPER_KINDS, d.paper.kind), position: oneOf(v.paper.position, PAPER_POSITIONS, d.paper.position) }
+      : d.paper,
+    rotation: ROTATIONS.includes(v.rotation as Rotation) ? (v.rotation as Rotation) : d.rotation,
   };
 }
 

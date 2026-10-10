@@ -59,7 +59,7 @@ describe('profile store', () => {
   });
 
   it('rejects files with the wrong version or shape', () => {
-    expect(() => parseProfile(JSON.stringify({ version: 4 }))).toThrow(/version/i);
+    expect(() => parseProfile(JSON.stringify({ version: 5 }))).toThrow(/version/i);
     expect(() => parseProfile(JSON.stringify({ version: 0 }))).toThrow(/version/i);
     expect(() => parseProfile(JSON.stringify({}))).toThrow(/version/i);
     expect(() => parseProfile('[]')).toThrow(/layout file/i);
@@ -101,9 +101,9 @@ describe('profile store', () => {
 });
 
 describe('profile version 2', () => {
-  it('defaults to version 3 with per-block layouts', () => {
+  it('defaults to version 4 with per-block layouts', () => {
     const p = defaultProfile();
-    expect(p.version).toBe(3);
+    expect(p.version).toBe(4);
     expect(p.envelope).toEqual({
       size: 'num10',
       customWidthIn: 9.5,
@@ -113,6 +113,8 @@ describe('profile version 2', () => {
       returnAddress: { lines: [] },
       returnLayout: defaultReturnLayout(),
       recipientLayout: defaultRecipientLayout(),
+      paper: { kind: 'envelope', position: 'center' },
+      rotation: 0,
     });
   });
 
@@ -124,7 +126,7 @@ describe('profile version 2', () => {
       theme: 'dark',
     }));
     const times = { kind: 'standard', id: 'times' };
-    expect(p.version).toBe(3);
+    expect(p.version).toBe(4);
     expect(p.theme).toBe('dark');
     expect(p.envelope.size).toBe('a7');
     expect(p.envelope.showReturn).toBe(false);
@@ -174,6 +176,8 @@ describe('profile version 2', () => {
         font: { kind: 'google', family: 'Inter' },
         fontSize: 16, align: 'center', anchorH: 'center', anchorV: 'top', offsetX: 1.5, offsetY: -2,
       },
+      paper: { kind: 'a4', position: 'left' },
+      rotation: 270,
     };
     expect(parseProfile(serializeProfile(p))).toEqual(p);
   });
@@ -277,11 +281,11 @@ describe('profile version 2', () => {
     expect(p.envelope.customHeightIn).toBe(d.customHeightIn);
   });
 
-  it('loads a stored version 1 profile as version 3', () => {
+  it('loads a stored version 1 profile as version 4', () => {
     const s = memoryStorage();
     s.setItem(PROFILE_KEY, JSON.stringify({ version: 1, envelope: { font: 'serif', fontSize: 14 }, theme: 'light' }));
     const p = loadProfile(s);
-    expect(p.version).toBe(3);
+    expect(p.version).toBe(4);
     expect(p.theme).toBe('light');
     expect(p.envelope.recipientLayout.font).toEqual({ kind: 'standard', id: 'times' });
   });
@@ -307,7 +311,7 @@ describe('profile version 3', () => {
 
   it('migrates a version 2 file, turning the return address into rich text', () => {
     const p = parseProfile(JSON.stringify(v2Fixture));
-    expect(p.version).toBe(3);
+    expect(p.version).toBe(4);
     expect(p.envelope.returnAddress).toEqual({
       lines: [
         { runs: [{ text: 'First Church' }] },
@@ -356,8 +360,8 @@ describe('profile version 3', () => {
     expect(p.envelope.returnAddress).toEqual({ lines: [] });
   });
 
-  it('rejects version 4', () => {
-    expect(() => parseProfile(JSON.stringify({ version: 4, envelope: {} }))).toThrow('Unsupported layout file version: 4');
+  it('rejects version 5', () => {
+    expect(() => parseProfile(JSON.stringify({ version: 5, envelope: {} }))).toThrow('Unsupported layout file version: 5');
   });
 });
 
@@ -403,7 +407,7 @@ describe('profile merge template', () => {
 
   it('uses the default for a version 3 file without a merge template', () => {
     const p = parseProfile(JSON.stringify({ version: 3, theme: 'dark' }));
-    expect(p.version).toBe(3);
+    expect(p.version).toBe(4);
     expect(p.mergeTemplate).toEqual(defaultTemplate);
   });
 
@@ -451,5 +455,56 @@ describe('profile merge template', () => {
     saveProfile(p, s);
     expect(loadProfile(s)).toEqual(p);
     expect(parseProfile(serializeProfile(p))).toEqual(p);
+  });
+});
+
+describe('profile version 4', () => {
+  it('migrates a version 3 file to the default paper and rotation, keeping the rest', () => {
+    const p = parseProfile(JSON.stringify({
+      version: 3,
+      envelope: { size: 'a7', showReturn: false, paper: { kind: 'letter', position: 'left' }, rotation: 90 },
+      theme: 'dark',
+    }));
+    expect(p.version).toBe(4);
+    expect(p.envelope.size).toBe('a7');
+    expect(p.envelope.showReturn).toBe(false);
+    expect(p.envelope.paper).toEqual({ kind: 'envelope', position: 'center' });
+    expect(p.envelope.rotation).toBe(0);
+    expect(p.theme).toBe('dark');
+  });
+
+  it('keeps valid paper and rotation', () => {
+    const p = parseProfile(JSON.stringify({
+      version: 4, envelope: { paper: { kind: 'a4', position: 'right' }, rotation: 270 },
+    }));
+    expect(p.envelope.paper).toEqual({ kind: 'a4', position: 'right' });
+    expect(p.envelope.rotation).toBe(270);
+  });
+
+  it('falls back to defaults for invalid paper and rotation, one field at a time', () => {
+    const d = defaultProfile().envelope;
+    const cases: unknown[] = [
+      { paper: 'letter', rotation: 45 },
+      { paper: null, rotation: '90' },
+      { paper: [], rotation: -90 },
+    ];
+    for (const envelope of cases) {
+      const p = parseProfile(JSON.stringify({ version: 4, envelope }));
+      expect(p.envelope.paper, JSON.stringify(envelope)).toEqual(d.paper);
+      expect(p.envelope.rotation, JSON.stringify(envelope)).toBe(d.rotation);
+    }
+    const mixed = parseProfile(JSON.stringify({ version: 4, envelope: { paper: { kind: 'tabloid', position: 'left' } } }));
+    expect(mixed.envelope.paper).toEqual({ kind: 'envelope', position: 'left' });
+    const mixed2 = parseProfile(JSON.stringify({ version: 4, envelope: { paper: { kind: 'letter', position: 'middle' } } }));
+    expect(mixed2.envelope.paper).toEqual({ kind: 'letter', position: 'center' });
+  });
+
+  it('round-trips paper and rotation through export and import', () => {
+    const p = defaultProfile();
+    p.envelope = { ...p.envelope, paper: { kind: 'letter', position: 'right' }, rotation: 180 };
+    expect(parseProfile(serializeProfile(p))).toEqual(p);
+    const s = memoryStorage();
+    saveProfile(p, s);
+    expect(loadProfile(s)).toEqual(p);
   });
 });
