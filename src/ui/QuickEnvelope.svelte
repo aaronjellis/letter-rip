@@ -256,14 +256,14 @@
   </div>
 
   <form class="form" id="envelope-form" onsubmit={(e) => { e.preventDefault(); print(); }}>
-    <section class="card rise" style="--i: 2" aria-labelledby="from-title">
+    <section class="card rise" style="--i: 2" aria-labelledby="from-title" data-ph-capture-attribute-block="from">
       <div class="card-head with-helper">
         <House size={20} aria-hidden="true" class="head-icon" />
         <div class="title-line">
           <h2 id="from-title" class="card-title">From</h2>
           <span class="print-toggle">
             <span class="print-caption" aria-hidden="true">Print</span>
-            <button type="button" class="switch" role="switch" aria-checked={settings.showReturn}
+            <button type="button" class="switch" role="switch" aria-label="Print From address" aria-checked={settings.showReturn}
               onclick={() => update('showReturn', !settings.showReturn)}>
               <span class="sr-only">Print From address</span>
             </button>
@@ -294,14 +294,14 @@
       </div>
     </section>
 
-    <section class="card rise" style="--i: 3" aria-labelledby="to-title">
+    <section class="card rise" style="--i: 3" aria-labelledby="to-title" data-ph-capture-attribute-block="to">
       <div class="card-head with-helper">
         <Send size={20} aria-hidden="true" class="head-icon" />
         <div class="title-line">
           <h2 id="to-title" class="card-title">To</h2>
           <span class="print-toggle">
             <span class="print-caption" aria-hidden="true">Print</span>
-            <button type="button" class="switch" role="switch" aria-checked={settings.showRecipient}
+            <button type="button" class="switch" role="switch" aria-label="Print To address" aria-checked={settings.showRecipient}
               onclick={() => update('showRecipient', !settings.showRecipient)}>
               <span class="sr-only">Print To address</span>
             </button>

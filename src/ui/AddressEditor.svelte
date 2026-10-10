@@ -512,7 +512,7 @@
   </fieldset>
 
   <div bind:this={el} class="editable" class:is-empty={empty}
-    contenteditable={disabled ? 'false' : 'true'} role="textbox" aria-multiline="true" aria-label={label}
+    contenteditable={disabled ? 'false' : 'true'} data-ph-no-capture role="textbox" aria-multiline="true" aria-label={label}
     aria-disabled={disabled} tabindex={disabled ? undefined : 0} data-placeholder={placeholder}
     style:font-family={family} style:font-size="{layout.fontSize}pt" style:text-align={layout.align}
     onfocus={onFocus} oninput={emit} onkeydown={onKeydown} onpaste={onPaste}
