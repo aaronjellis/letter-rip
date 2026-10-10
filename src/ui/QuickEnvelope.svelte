@@ -495,7 +495,37 @@
   </div>
 
   <form class="form" class:list={listMode} id="envelope-form" onsubmit={(e) => { e.preventDefault(); print(); }}>
-    <section class="card rise" style="--i: 2" aria-labelledby="from-title" data-ph-capture-attribute-block="from">
+    <!-- What we're printing: one envelope, or one per row of a list. Spans both cards so From and To stay alike. -->
+    <div class="mode-bar rise" style="--i: 2">
+      <div class="segmented mode" role="group" aria-label="What to print">
+        <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
+          <User size={16} aria-hidden="true" />One envelope
+        </button>
+        <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
+          <Table size={16} aria-hidden="true" />Many from a list
+        </button>
+      </div>
+      {#if listMode}
+        <div class="list-strip">
+          <p class="strip-text">
+            {#if dataset}
+              <span class="strip-name" title={dataset.sourceName}>{dataset.sourceName}</span>
+              <span class="strip-count"><span aria-hidden="true">&nbsp;·&nbsp;</span><span class="sr-only">, </span>{listSummary}</span>
+            {:else}
+              <span class="strip-empty">No list loaded</span>
+            {/if}
+          </p>
+          <div class="strip-actions">
+            <button type="button" class="strip-edit" aria-haspopup="dialog" bind:this={stripEdit}
+              onclick={(e) => listDialog?.open(e.currentTarget)}>{dataset ? 'Edit list' : 'Load list'}</button>
+            {#if dataset}
+              <button type="button" class="strip-remove" onclick={removeList}>Remove</button>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </div>
+    <section class="card rise" style="--i: 3" aria-labelledby="from-title" data-ph-capture-attribute-block="from">
       <div class="card-head with-helper">
         <House size={20} aria-hidden="true" class="head-icon" />
         <div class="title-line">
@@ -533,7 +563,7 @@
       </div>
     </section>
 
-    <section class="card to-card rise" style="--i: 3" aria-labelledby="to-title" data-ph-capture-attribute-block="to">
+    <section class="card to-card rise" style="--i: 4" aria-labelledby="to-title" data-ph-capture-attribute-block="to">
       <div class="card-head with-helper">
         <Send size={20} aria-hidden="true" class="head-icon" />
         <div class="title-line">
@@ -549,36 +579,9 @@
         <p class="helper">{listMode ? 'One envelope per row of your list' : "Who you're sending to"}</p>
       </div>
       <!-- Mode tabs: a full-width row under the header, so the title row stays as light as From's. -->
-      <div class="segmented mode" role="group" aria-label="Send to">
-        <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
-          <User size={16} aria-hidden="true" />Single address
-        </button>
-        <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
-          <Table size={16} aria-hidden="true" />From a list
-        </button>
-      </div>
       {#if !settings.showRecipient}<p class="muted off-note">This address won't print until you turn <strong>Print</strong> on.</p>{/if}
       <div class="card-body" class:off={!settings.showRecipient}>
         {#if listMode}
-          <!-- One-line summary of the list; loading and editing happen in ListDialog. -->
-          <div class="list-strip">
-            <Table size={18} aria-hidden="true" />
-            <p class="strip-text">
-              {#if dataset}
-                <span class="strip-name" title={dataset.sourceName}>{dataset.sourceName}</span>
-                <span class="strip-count"><span aria-hidden="true">&nbsp;·&nbsp;</span><span class="sr-only">, </span>{listSummary}</span>
-              {:else}
-                <span class="strip-empty">No list loaded</span>
-              {/if}
-            </p>
-            <div class="strip-actions">
-              <button type="button" class="strip-edit" aria-haspopup="dialog" bind:this={stripEdit}
-                onclick={(e) => listDialog?.open(e.currentTarget)}>{dataset ? 'Edit list' : 'Load list'}</button>
-              {#if dataset}
-                <button type="button" class="strip-remove" onclick={removeList}>Remove</button>
-              {/if}
-            </div>
-          </div>
           <AddressEditor label="To: address template" value={mergeTemplate}
             onchange={onmergetemplate} fields={fieldNames}
             layout={settings.recipientLayout} onlayout={(l) => update('recipientLayout', l)}
@@ -655,14 +658,10 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 8px 12px;
     min-width: 0;
-    padding: 6px 6px 6px 12px;
-    background: var(--subtle);
-    border: 1px solid var(--divider);
-    border-radius: var(--radius);
+    margin-left: auto;
   }
-  .list-strip > :global(.lucide) { color: var(--muted); }
   .strip-text { display: flex; align-items: baseline; flex: 1 1 160px; min-width: 0; margin: 0; font-size: 14px; white-space: nowrap; }
   .strip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text); }
   .strip-count { flex: none; font-size: 13px; color: var(--muted); }
@@ -675,10 +674,10 @@
   /* Print switch at the right edge of the card header, centered on the title. */
   .print-toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
   /* To header: the Single | From a list toggle sits left of Print and wraps under the title when narrow. */
-  /* Mode tabs span the card; each tab takes half. */
-  .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; margin: 16px 0 0; padding: 3px; gap: 3px; }
-  .segmented.mode button { min-height: 36px; padding: 0 12px; gap: 8px; font-size: 14px; justify-content: center; }
-  .segmented.mode + .card-body, .segmented.mode + .off-note { margin-top: 16px; }
+  /* Mode bar above the cards: the choice on the left, the list summary on the right. */
+  .mode-bar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; min-width: 0; }
+  .segmented.mode { padding: 3px; gap: 3px; }
+  .segmented.mode button { min-height: 36px; padding: 0 14px; gap: 8px; font-size: 14px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
   .switch {
     position: relative;
