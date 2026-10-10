@@ -7,6 +7,8 @@
   import QuickEnvelope from './ui/QuickEnvelope.svelte';
   import AboutDialog from './ui/AboutDialog.svelte';
   import Coffee from '@lucide/svelte/icons/coffee';
+  import Table from '@lucide/svelte/icons/table';
+  import ArrowRight from '@lucide/svelte/icons/arrow-right';
   import Info from '@lucide/svelte/icons/info';
 
   let profile = $state<Profile>(loadProfile());
@@ -56,6 +58,15 @@
         Support my experiments
       </a>
     </div>
+    <!-- Cross-promo for the sibling tool. Shared .promo-card styles live in app.css. -->
+    <a class="promo-card" href="https://labs.aaronjellis.com/hard-copy/">
+      <span class="promo-icon"><Table size={18} aria-hidden="true" /></span>
+      <span class="promo-text">
+        <span class="promo-title">Need to print spreadsheets?</span>
+        <span class="promo-sub">Try Hard Copy, my spreadsheet printing utility.</span>
+      </span>
+      <ArrowRight size={18} aria-hidden="true" class="promo-arrow" />
+    </a>
   </footer>
 
   <AboutDialog bind:this={about} />
@@ -104,6 +115,8 @@
     gap: 16px;
     flex-wrap: wrap;
   }
+  /* The promo card takes its own full row under the links. */
+  .footnote :global(.promo-card) { flex-basis: 100%; margin-top: 8px; }
   .footnote p { margin: 0; font-size: 14px; color: var(--muted); }
   .footnote strong { font-weight: 600; color: var(--text); }
   /* Support link: quiet outlined pill in the app's own system, no third-party script. */
