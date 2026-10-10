@@ -59,7 +59,8 @@
     </p>
     <p>
       Letter Rip works on managed Chromebooks and other locked-down devices because everything runs on
-      the device and nothing is uploaded. Export your layout to a file and import it on another
+      the device and nothing is uploaded. Font previews for Google Fonts search results are fetched
+      from Google. Export your layout to a file and import it on another
       computer to pick up where you left off.
     </p>
     <p>
