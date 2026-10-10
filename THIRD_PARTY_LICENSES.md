@@ -12,6 +12,7 @@ These packages are bundled into the built site. Svelte is a build tool, but its 
 | [@pdf-lib/fontkit](https://www.npmjs.com/package/@pdf-lib/fontkit) | 1.1.1 | MIT License | [Hopding/fontkit](https://github.com/Hopding/fontkit) |
 | [pdfjs-dist](https://www.npmjs.com/package/pdfjs-dist) | 6.4.299 | Apache License 2.0 | [mozilla/pdf.js](https://github.com/mozilla/pdf.js) |
 | [idb-keyval](https://www.npmjs.com/package/idb-keyval) | 6.3.0 | Apache License 2.0 | [jakearchibald/idb-keyval](https://github.com/jakearchibald/idb-keyval) |
+| [xlsx (SheetJS Community Edition)](https://sheetjs.com) | 0.20.3 | Apache License 2.0 | [SheetJS/sheetjs](https://git.sheetjs.com/sheetjs/sheetjs) |
 | [@lucide/svelte](https://www.npmjs.com/package/@lucide/svelte) | 1.54.0 | ISC License (some icons MIT, from Feather) | [lucide-icons/lucide](https://github.com/lucide-icons/lucide) |
 | [svelte](https://www.npmjs.com/package/svelte) (runtime) | 5 | MIT License | [sveltejs/svelte](https://github.com/sveltejs/svelte) |
 
@@ -73,6 +74,10 @@ SOFTWARE.
 
 Copyright 2024 Mozilla Foundation. Licensed under the Apache License 2.0. The package includes no NOTICE file. The full license text follows the idb-keyval notice.
 
+### xlsx (SheetJS Community Edition)
+
+Copyright (C) 2012-present SheetJS LLC. Licensed under the Apache License 2.0. Loaded only when a spreadsheet file is imported. The full license text follows the idb-keyval notice.
+
 ### idb-keyval
 
 The package includes no NOTICE file.
@@ -95,7 +100,7 @@ limitations under the License.
 
 ### Apache License 2.0
 
-This is the license text shipped with pdfjs-dist. It applies to pdfjs-dist and idb-keyval.
+This is the license text shipped with pdfjs-dist. It applies to pdfjs-dist, idb-keyval, and xlsx.
 
 ```text
                                  Apache License
