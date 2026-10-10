@@ -413,11 +413,11 @@
       <!-- Mode and size side by side; the select's options already show the size. -->
       <div class="envelope-controls">
         <div class="segmented mode" role="group" aria-label="What to print">
-          <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
-            <User size={16} aria-hidden="true" />One envelope
+          <button type="button" aria-pressed={toMode === 'single'} aria-label="One envelope" onclick={() => (toMode = 'single')}>
+            <User size={16} aria-hidden="true" /><span class="mode-long">One envelope</span><span class="mode-short">One</span>
           </button>
-          <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
-            <Table size={16} aria-hidden="true" />Many from a list
+          <button type="button" aria-pressed={toMode === 'list'} aria-label="Many from a list" onclick={chooseListMode}>
+            <Table size={16} aria-hidden="true" /><span class="mode-long">Many from a list</span><span class="mode-short">Many</span>
           </button>
         </div>
         <SizePicker {settings} onchange={onsettings} compact />
@@ -684,6 +684,12 @@
   .envelope-card .title-line { flex-wrap: wrap; row-gap: 12px; }
   .envelope-controls { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; flex-wrap: wrap; }
   .envelope-controls .segmented.mode { flex: none; }
+  .mode-short { display: none; }
+  /* Below the wide tier the row is tight, so the toggle reads One / Many. */
+  @media (max-width: 1179px) {
+    .mode-long { display: none; }
+    .mode-short { display: inline; }
+  }
   .envelope-controls :global(.size-picker) { flex: 1 1 200px; min-width: 0; max-width: 360px; }
   .segmented.mode { padding: 3px; gap: 3px; }
   .segmented.mode button { min-height: 32px; padding: 0 14px; gap: 8px; font-size: 14px; }
