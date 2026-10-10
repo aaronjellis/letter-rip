@@ -91,7 +91,7 @@
   );
   const fieldNames = $derived(dataset ? dataset.columns.map((c) => c.name) : []);
   const listSummary = $derived(
-    dataset ? `${includedCount(dataset)} of ${dataset.rows.length} ${dataset.rows.length === 1 ? 'row' : 'rows'} included` : '',
+    dataset ? `${includedCount(dataset)} of ${dataset.rows.length} ${dataset.rows.length === 1 ? 'row' : 'rows'}` : '',
   );
 
   /** Envelopes Print makes, as of the last stats refresh. */
@@ -426,7 +426,7 @@
         <Table size={16} aria-hidden="true" />
         {#if dataset}
           <span class="chip-name">{dataset.sourceName}</span>
-          <span class="chip-count"><span aria-hidden="true">·</span><span class="sr-only">,</span> {listSummary}</span>
+          <span class="chip-count"><span aria-hidden="true">·</span><span class="sr-only">,</span> {listSummary}<span class="chip-included">{' included'}</span></span>
           <Pencil size={14} aria-hidden="true" class="chip-edit" />
           <span class="sr-only">. Edit list</span>
         {:else}
@@ -820,14 +820,22 @@
     .actions .btn-primary { flex: 1 1 0; min-width: 0; padding: 0 16px; }
     .actions .btn-primary .btn-label { display: none; }
     .actions .btn-primary .btn-label-short { display: inline; white-space: nowrap; }
-    /* Phone: the mode choice stretches full width; the list chip gets its own row. */
-    .mode-bar { flex-direction: column; align-items: stretch; }
+    /*
+     * Phone: the mode choice stretches full width; the list chip gets its own row. The bar must be
+     * single-line: a wrapping column flexbox sizes its line to the widest child, so a long chip
+     * would push both rows past the screen instead of truncating the list name.
+     */
+    .mode-bar { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
     .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; }
     .segmented.mode button { justify-content: center; }
     .list-chip-row { margin-left: 0; }
-    .list-chip { flex: 1 1 auto; max-width: none; justify-content: center; }
+    .list-chip { flex: 1 1 auto; min-width: 0; max-width: none; justify-content: center; }
   }
   @media (max-width: 480px) {
     .print-caption { display: none; }
+    /* Tighter mode buttons so "Many from a list" stays on one line down to 320px. */
+    .segmented.mode button { gap: 6px; padding: 0 6px; }
+    /* Phone: the chip reads "3 of 3 rows" so the list name keeps its room; screen readers still hear "included". */
+    .chip-included { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   }
 </style>
