@@ -66,6 +66,20 @@
     return `"${s.replace(/["\\]/g, '\\$&')}"`;
   }
 
+  /**
+   * Merge-token highlights (CSS Custom Highlight API), shared by every editor that has `fields`.
+   * Each editor adds and removes only its own ranges. Null where the API is missing; tokens then
+   * show as plain text.
+   */
+  const tokenHighlights: { known: Highlight; unknown: Highlight } | null = (() => {
+    if (typeof CSS === 'undefined' || !('highlights' in CSS) || typeof Highlight === 'undefined') return null;
+    const known = new Highlight();
+    const unknown = new Highlight();
+    CSS.highlights.set('merge-token', known);
+    CSS.highlights.set('merge-token-unknown', unknown);
+    return { known, unknown };
+  })();
+
   const UI_FAMILY = 'var(--font-ui)';
   const STANDARD_FAMILIES = {
     helvetica: 'Helvetica, Arial, sans-serif',
@@ -74,7 +88,7 @@
 </script>
 
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { BlockLayout, HAnchor } from '../lib/envelopes/layout';
   import { NO_FACES, REGULAR_FACE } from '../lib/fonts/types';
   import {
@@ -83,6 +97,7 @@
   import { isRichEmpty, normalizeRich, type RichText } from '../lib/richtext';
   import { domToRich, plainToPasteHtml, richToDom, sanitizePasteHtml } from '../lib/richtext-dom';
   import { clampFontSize, FONT_SIZE_MAX, FONT_SIZE_MIN } from '../lib/store/profile';
+  import { fieldKey, TOKEN_RE } from '../lib/merge/render';
   import FontPicker from './FontPicker.svelte';
   import Bold from '@lucide/svelte/icons/bold';
   import Italic from '@lucide/svelte/icons/italic';
@@ -92,6 +107,7 @@
   import ALargeSmall from '@lucide/svelte/icons/a-large-small';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import Braces from '@lucide/svelte/icons/braces';
 
   let {
     value,
@@ -102,6 +118,7 @@
     label,
     disabled = false,
     placeholder = '',
+    fields,
   }: {
     value: RichText;
     onchange: (rich: RichText) => void;
@@ -111,6 +128,8 @@
     label: string;
     disabled?: boolean;
     placeholder?: string;
+    /** Merge field names. When set, the toolbar offers Insert field and `{{Field}}` tokens are highlighted. */
+    fields?: string[];
   } = $props();
 
   const SIZE_HINT = 'Applies to the selected lines, or to the whole address when nothing is selected.';
@@ -159,6 +178,7 @@
     richToDom(rich, el);
     lastJson = JSON.stringify(rich);
     empty = isRichEmpty(rich);
+    decorate();
     // The old nodes are gone, so no selection is left for the toolbar to act on.
     savedRange = null;
     span = null;
@@ -180,6 +200,7 @@
   function emit() {
     if (!el) return;
     ensureLines();
+    decorate();
     const raw = domToRich(el);
     empty = isRichEmpty(raw);
     const rich = normalizeRich(raw);
@@ -427,6 +448,136 @@
     emit();
   }
 
+  // ---- Merge fields: Insert field menu and token highlighting ----
+
+  /** This editor's ranges in the shared token highlights. */
+  let tokenRanges: Range[] = [];
+  let fieldsOpen = $state(false);
+  /** Index of the active option in the Insert field list. */
+  let activeField = $state(0);
+  let fieldsTrigger = $state<HTMLButtonElement>();
+  let fieldsList = $state<HTMLUListElement>();
+  const hasFields = $derived(!!fields && fields.length > 0);
+
+  function clearTokenRanges() {
+    if (!tokenHighlights) return;
+    for (const r of tokenRanges) {
+      tokenHighlights.known.delete(r);
+      tokenHighlights.unknown.delete(r);
+    }
+    tokenRanges = [];
+  }
+
+  /**
+   * Highlight `{{Field}}` tokens without touching the DOM: one Range per token, known fields in
+   * `merge-token`, unknown ones in `merge-token-unknown`. Tokens split across runs are not tokens.
+   */
+  function decorate() {
+    if (!tokenHighlights) return;
+    clearTokenRanges();
+    if (!el || !fields) return;
+    const known = new Set(fields.map(fieldKey));
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent ?? '';
+      if (!text.includes('{{')) continue;
+      for (const m of text.matchAll(TOKEN_RE)) {
+        if (m[1].trim() === '') continue;
+        const range = document.createRange();
+        range.setStart(node, m.index!);
+        range.setEnd(node, m.index! + m[0].length);
+        (known.has(fieldKey(m[1])) ? tokenHighlights.known : tokenHighlights.unknown).add(range);
+        tokenRanges.push(range);
+      }
+    }
+  }
+
+  // Re-highlight when the field names change (a list loads or a column is renamed).
+  $effect(() => {
+    void fields;
+    untrack(decorate);
+  });
+  $effect(() => clearTokenRanges);
+
+  async function openFields() {
+    if (!hasFields) return;
+    fieldsOpen = true;
+    activeField = 0;
+    await tick();
+    fieldsList?.focus();
+  }
+
+  function closeFields(returnFocus: boolean) {
+    if (!fieldsOpen) return;
+    fieldsOpen = false;
+    if (returnFocus) fieldsTrigger?.focus();
+  }
+
+  /** Insert `{{name}}` at the saved caret as plain text in the current run, or at the end of the last line. */
+  function insertField(name: string) {
+    fieldsOpen = false;
+    if (!el || disabled) return;
+    const sel = document.getSelection();
+    const valid = savedRange && el.contains(savedRange.startContainer) && el.contains(savedRange.endContainer);
+    if (document.activeElement !== el) el.focus({ preventScroll: true });
+    if (!sel) return;
+    if (valid) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange!);
+    } else {
+      ensureLines();
+      const last = el.lastChild ?? el;
+      const range = document.createRange();
+      range.selectNodeContents(last);
+      // An empty line holds only <br>; insert before it.
+      if (last.lastChild?.nodeName === 'BR') range.setEndBefore(last.lastChild);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.execCommand('insertText', false, `{{${name}}}`);
+    emit();
+  }
+
+  function onFieldsKeydown(e: KeyboardEvent) {
+    const list = fields ?? [];
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeField = (activeField + 1) % list.length;
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeField = (activeField - 1 + list.length) % list.length;
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      activeField = 0;
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      activeField = list.length - 1;
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      // Enter must not submit the surrounding form (which prints).
+      e.preventDefault();
+      if (list[activeField] !== undefined) insertField(list[activeField]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFields(true);
+    } else if (e.key === 'Tab') {
+      closeFields(false);
+    }
+  }
+
+  function onFieldsTriggerKeydown(e: KeyboardEvent) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      void openFields();
+    }
+  }
+
+  function onWindowPointerDown(e: PointerEvent) {
+    if (!fieldsOpen || !(e.target instanceof Node)) return;
+    if (fieldsList?.contains(e.target) || fieldsTrigger?.contains(e.target)) return;
+    fieldsOpen = false;
+  }
+
   /** Toolbar buttons keep focus, and so the selection, in the editor. */
   function keepSelection(e: MouseEvent) {
     e.preventDefault();
@@ -465,6 +616,8 @@
     };
   });
 </script>
+
+<svelte:window onpointerdown={onWindowPointerDown} />
 
 <!-- focusout bubbles from the toolbar and the editor; it only decides when to tidy the markup. -->
 <div class="address-editor" class:disabled bind:this={root} onfocusout={onFocusOut}>
@@ -509,6 +662,30 @@
         </button>
       {/each}
     </div>
+    {#if fields}
+      <span class="insert-field" title={hasFields ? undefined : 'Load a list first'}>
+        <button type="button" class="insert-trigger" bind:this={fieldsTrigger} aria-label="Insert field"
+          aria-haspopup="listbox" aria-expanded={fieldsOpen} aria-controls="{id}-fields"
+          aria-disabled={!hasFields} onmousedown={keepSelection} onkeydown={onFieldsTriggerKeydown}
+          onclick={() => (fieldsOpen ? closeFields(false) : openFields())}>
+          <Braces size={16} aria-hidden="true" /><span class="insert-label">Insert field</span>
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
+      </span>
+      {#if fieldsOpen && fields.length > 0}
+        <ul class="fields" id="{id}-fields" role="listbox" tabindex="-1" aria-label="Fields"
+          bind:this={fieldsList} aria-activedescendant="{id}-field-{activeField}" onkeydown={onFieldsKeydown}>
+          {#each fields as name, i (name)}
+            <!-- Options are picked with the pointer here; the listbox handles the keyboard. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <li id="{id}-field-{i}" role="option" aria-selected={i === activeField} class:active={i === activeField}
+              onmousedown={keepSelection} onmouseenter={() => (activeField = i)} onclick={() => insertField(name)}>
+              <Braces size={14} aria-hidden="true" /><span>{name}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
   </fieldset>
 
   <div bind:this={el} class="editable" class:is-empty={empty}
@@ -588,6 +765,47 @@
     text-align: left;
     pointer-events: none;
   }
+  /* Insert field: a pill trigger; its list floats under the toolbar's right edge. */
+  .insert-field { display: inline-flex; margin-left: auto; }
+  .insert-trigger { min-height: 38px; gap: 6px; padding: 0 10px 0 12px; font-size: 14px; }
+  .insert-trigger :global(.lucide-braces) { color: var(--muted); }
+  .fields {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 8px;
+    z-index: 20;
+    min-width: 200px;
+    max-width: calc(100% - 16px);
+    max-height: 280px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-float);
+  }
+  .fields:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .fields li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .fields li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fields li :global(.lucide) { color: var(--muted); }
+  .fields li.active { background: var(--hover); }
+  :global(:root[data-theme='dark']) .fields li.active { background: var(--subtle); }
+  @media (max-width: 480px) {
+    .insert-label { display: none; }
+    .insert-trigger { padding: 0 8px 0 10px; }
+  }
+
   /* A disabled editor is read-only and cannot take focus. */
   .disabled { background: var(--subtle); border-color: var(--divider); }
   .disabled .editable { color: var(--muted); cursor: default; }

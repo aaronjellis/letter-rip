@@ -6,6 +6,9 @@
   import { createBrowserFontProvider } from '../lib/fonts/loader';
   import { renderPdfPageToCanvas, isRenderCancelled } from '../lib/pdf/preview';
   import { errorMessage } from '../lib/errors';
+  import { includedCount, recordFromRow, type Dataset } from '../lib/merge/import';
+  import { renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
+  import DataPanel from './DataPanel.svelte';
   import SizePicker from './SizePicker.svelte';
   import BlockLayoutEditor from './BlockLayoutEditor.svelte';
   import AddressEditor from './AddressEditor.svelte';
@@ -20,14 +23,34 @@
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import CircleAlert from '@lucide/svelte/icons/circle-alert';
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+  import User from '@lucide/svelte/icons/user';
+  import Table from '@lucide/svelte/icons/table';
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import Info from '@lucide/svelte/icons/info';
 
-  let { settings, onsettings }: {
+  let { settings, onsettings, mergeTemplate, onmergetemplate }: {
     settings: EnvelopeSettings;
     onsettings: (s: EnvelopeSettings) => void;
+    /** The To template for mail merge, with `{{Field}}` tokens (persisted in the profile). */
+    mergeTemplate: RichText;
+    onmergetemplate: (t: RichText) => void;
   } = $props();
+
+  /** Above this many rows, warn that building the PDF may be slow. */
+  const LARGE_LIST = 2000;
 
   // Recipient lives only for this session (spec: never persisted).
   let recipient = $state.raw<RichText>({ lines: [] });
+  // Mail merge: the To source and the loaded list are session state; both modes stay in memory.
+  let toMode = $state<'single' | 'list'>('single');
+  let dataset = $state.raw<Dataset | null>(null);
+  /** Position in `included` of the record the preview shows. */
+  let current = $state(0);
+  /** Replaced-character warnings from the last full list build, as 1-based row numbers. */
+  let listWarnings = $state<{ rows: number[]; chars: string[] }>({ rows: [], chars: [] });
+  /** True while Print or Download builds the whole list. */
+  let exporting = $state(false);
   // Bytes of the latest preview PDF; also what Download saves.
   let pdfBytes = $state.raw<Uint8Array | null>(null);
   let warnings = $state<EnvelopeWarning[]>([]);
@@ -46,16 +69,62 @@
   let lastPrintUrl = '';
   const downloadUrls = new Set<string>();
 
+  const listMode = $derived(toMode === 'list');
+  /** Dataset row indexes that are included, in order. */
+  const included = $derived(dataset ? dataset.included.flatMap((on, i) => (on ? [i] : [])) : []);
+  const index = $derived(Math.min(current, Math.max(0, included.length - 1)));
+  /**
+   * One rendered To block per included row, minus rows whose block is empty. `rows[i]` is the
+   * dataset row of `blocks[i]`.
+   */
+  const merged = $derived.by(() => {
+    const blocks: RichText[] = [];
+    const rows: number[] = [];
+    if (!dataset) return { blocks, rows, skipped: 0 };
+    for (const r of included) {
+      const block = renderTemplate(mergeTemplate, recordFromRow(dataset, r));
+      if (isRichEmpty(block)) continue;
+      blocks.push(block);
+      rows.push(r);
+    }
+    return { blocks, rows, skipped: included.length - blocks.length };
+  });
+  const currentRow = $derived(included.length > 0 ? included[index] : -1);
+  const currentBlock = $derived(
+    dataset && currentRow >= 0 ? renderTemplate(mergeTemplate, recordFromRow(dataset, currentRow)) : null,
+  );
+  const currentCaption = $derived(
+    dataset && currentRow >= 0 ? (dataset.rows[currentRow][0] || `Row ${currentRow + 1}`) : '',
+  );
+  const unknown = $derived(dataset ? unknownTokens(mergeTemplate, dataset.columns.map((c) => c.name)) : []);
+  const fieldNames = $derived(dataset ? dataset.columns.map((c) => c.name) : []);
+
+  const hasReturn = $derived(settings.showReturn && !isRichEmpty(settings.returnAddress));
   // Something prints when either enabled block has text.
   const canPrint = $derived(
-    (settings.showRecipient && !isRichEmpty(recipient)) || (settings.showReturn && !isRichEmpty(settings.returnAddress)),
+    listMode
+      ? merged.blocks.length > 0 && (settings.showRecipient || hasReturn)
+      : (settings.showRecipient && !isRichEmpty(recipient)) || hasReturn,
   );
+  /** What the preview draws: the single recipient, or the current record. Null when nothing prints. */
+  const previewBlock = $derived(
+    listMode
+      ? currentBlock && ((settings.showRecipient && !isRichEmpty(currentBlock)) || hasReturn) ? currentBlock : null
+      : canPrint ? recipient : null,
+  );
+  const printCount = $derived(merged.blocks.length);
   const blankMessage = $derived(
     !settings.showRecipient && !settings.showReturn
       ? 'Turn on From or To to print something.'
-      : settings.showRecipient
-        ? 'Type a To address to see your envelope.'
-        : 'Type a From address to see your envelope.',
+      : listMode && settings.showRecipient
+        ? !dataset
+          ? 'Load a list to preview your envelopes.'
+          : included.length === 0
+            ? 'No rows included. Select rows in the list to preview them.'
+            : 'This row has no address. Step to another row, or add fields to the To template.'
+        : settings.showRecipient
+          ? 'Type a To address to see your envelope.'
+          : 'Type a From address to see your envelope.',
   );
   const size = $derived(resolveEnvelopeSize(settings));
 
@@ -66,9 +135,40 @@
     onsettings({ ...settings, [key]: value });
   }
 
-  /** Build the PDF for the current inputs. */
-  function build() {
-    return buildEnvelopePdf([recipient], settings, fonts);
+  /** Build the PDF for the current inputs: one page, or in list mode one page per included row. */
+  async function build() {
+    if (!listMode) return buildEnvelopePdf([recipient], settings, fonts);
+    const { blocks, rows } = merged;
+    const result = await buildEnvelopePdf(blocks, settings, fonts);
+    const chars = new Set<string>();
+    for (const w of result.warnings) for (const c of w.replaced) chars.add(c);
+    listWarnings = { rows: result.warnings.map((w) => rows[w.block] + 1), chars: [...chars] };
+    return result;
+  }
+
+  /**
+   * A new list. A column rename (same source, same shape) rewrites matching template tokens so
+   * they follow the column.
+   */
+  function onDataset(next: Dataset | null) {
+    const prev = dataset;
+    if (prev && next && next.source === prev.source && next.headerRow === prev.headerRow
+      && next.transposed === prev.transposed && next.columns.length === prev.columns.length) {
+      let template = mergeTemplate;
+      next.columns.forEach((col, i) => {
+        const old = prev.columns[i];
+        if (old.id === col.id && old.name !== col.name) template = renameTokens(template, old.name, col.name);
+      });
+      if (template !== mergeTemplate) onmergetemplate(template);
+    } else {
+      current = 0;
+    }
+    dataset = next;
+  }
+
+  function stepRecord(delta: number) {
+    if (included.length === 0) return;
+    current = Math.min(included.length - 1, Math.max(0, index + delta));
   }
 
   function pdfUrl(bytes: Uint8Array): string {
@@ -80,10 +180,13 @@
   // A build that finishes after its effect run was cleaned up is discarded, so a
   // slow, stale build can never overwrite a newer preview.
   $effect(() => {
-    const printable = canPrint;
-    void recipient;
+    const block = previewBlock;
     void settings;
-    if (!printable) {
+    // Full-list warnings describe the last export; any change makes them stale.
+    void mergeTemplate;
+    void dataset;
+    listWarnings = { rows: [], chars: [] };
+    if (!block) {
       pdfBytes = null;
       drawn = false;
       warnings = [];
@@ -97,7 +200,7 @@
       error = '';
       building = true;
       try {
-        const result = await build();
+        const result = await buildEnvelopePdf([block], settings, fonts);
         if (cancelled) return;
         warnings = result.warnings;
         returnReplaced = result.returnReplaced;
@@ -170,13 +273,27 @@
     downloadUrls.clear();
   });
 
-  function download() {
-    if (!pdfBytes) return;
-    const url = pdfUrl(pdfBytes);
+  async function download() {
+    let bytes = pdfBytes;
+    if (listMode) {
+      if (!canPrint || exporting) return;
+      exporting = true;
+      error = '';
+      try {
+        bytes = (await build()).bytes;
+      } catch (err) {
+        error = errorMessage(err);
+        return;
+      } finally {
+        exporting = false;
+      }
+    }
+    if (!bytes) return;
+    const url = pdfUrl(bytes);
     downloadUrls.add(url);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'envelope.pdf';
+    a.download = listMode ? 'envelopes.pdf' : 'envelope.pdf';
     a.click();
     // The browser reads the blob asynchronously; release it once the download has started.
     setTimeout(() => {
@@ -186,10 +303,12 @@
   }
 
   async function print() {
+    if (!canPrint || exporting) return;
     if (lastPrintUrl) {
       URL.revokeObjectURL(lastPrintUrl);
       lastPrintUrl = '';
     }
+    exporting = listMode;
     try {
       error = '';
       const url = pdfUrl((await build()).bytes);
@@ -203,8 +322,12 @@
       }
     } catch (err) {
       error = errorMessage(err);
+    } finally {
+      exporting = false;
     }
   }
+
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 </script>
 
 <div class="workspace">
@@ -221,6 +344,18 @@
         <h2 class="card-title">Preview</h2>
       </div>
       {#if building || rendering}<p class="updating" aria-live="polite"><LoaderCircle class="spin" size={18} aria-hidden="true" />Updating preview…</p>{/if}
+      {#if listMode && included.length > 0}
+        <div class="record-nav">
+          <span class="record-caption muted" title={currentCaption}>{currentCaption}</span>
+          <div class="stepper" role="group" aria-label="Preview record">
+            <button type="button" class="step" aria-label="Previous record" disabled={index === 0}
+              onclick={() => stepRecord(-1)}><ChevronLeft size={18} aria-hidden="true" /></button>
+            <span class="record-pos" aria-live="polite"><span class="sr-only">Record </span>{index + 1} / {included.length}</span>
+            <button type="button" class="step" aria-label="Next record" disabled={index >= included.length - 1}
+              onclick={() => stepRecord(1)}><ChevronRight size={18} aria-hidden="true" /></button>
+          </div>
+        </div>
+      {/if}
     </div>
     <!-- The stage reserves the envelope's shape so the panel does not jump between renders. -->
     <div class="stage" bind:this={stage} style:aspect-ratio={`${size.widthIn} / ${size.heightIn}`}>
@@ -241,21 +376,43 @@
       {#if returnReplaced.length > 0}
         <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the From address are not supported and were replaced with "?": {returnReplaced.join(' ')}</span></p>
       {/if}
-      {#if settings.showRecipient && warnings.length > 0}
+      {#if listMode}
+        {#if settings.showRecipient && listWarnings.rows.length > 0}
+          <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the To address are not supported and were replaced with "?" in {listWarnings.rows.length === 1 ? 'row' : 'rows'} {listWarnings.rows.join(', ')}: {listWarnings.chars.join(' ')}</span></p>
+        {:else if settings.showRecipient && warnings.length > 0}
+          <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in row {currentRow + 1} are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
+        {/if}
+        {#if dataset && settings.showRecipient}
+          {#if unknown.length > 0}
+            <p class="muted message status-line"><TriangleAlert size={18} aria-hidden="true" /><span>{unknown.length === 1 ? 'This field isn’t' : 'These fields aren’t'} in your list and will print blank: {unknown.map((u) => `{{${u}}}`).join(', ')}</span></p>
+          {/if}
+          {#if included.length === 0}
+            <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>No rows included.</span></p>
+          {:else if merged.skipped > 0}
+            <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>{plural(merged.skipped, 'row', 'rows')} skipped: no address</span></p>
+          {/if}
+          {#if included.length > LARGE_LIST}
+            <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>{plural(included.length, 'row', 'rows')} included. Making the PDF may take a while.</span></p>
+          {/if}
+        {/if}
+      {:else if settings.showRecipient && warnings.length > 0}
         <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the To address are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
       {/if}
       <div class="actions">
-        <button class="btn btn-secondary" type="button" disabled={!pdfBytes} onclick={download}>
+        <button class="btn btn-secondary" type="button" disabled={listMode ? !canPrint || exporting : !pdfBytes} onclick={download}>
           <Download size={20} aria-hidden="true" />
-          Download PDF
+          {listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}
         </button>
         <!-- Outside the form, so it submits it through the form attribute. -->
-        <button class="btn btn-primary" type="submit" form="envelope-form" disabled={!canPrint}><Printer size={20} aria-hidden="true" />Print envelope</button>
+        <button class="btn btn-primary" type="submit" form="envelope-form" disabled={!canPrint || exporting}>
+          {#if exporting}<LoaderCircle class="spin" size={20} aria-hidden="true" />{:else}<Printer size={20} aria-hidden="true" />{/if}
+          {listMode ? (dataset ? `Print ${plural(printCount, 'envelope', 'envelopes')}` : 'Print envelopes') : 'Print envelope'}
+        </button>
       </div>
     </div>
   </div>
 
-  <form class="form" id="envelope-form" onsubmit={(e) => { e.preventDefault(); print(); }}>
+  <form class="form" class:list={listMode} id="envelope-form" onsubmit={(e) => { e.preventDefault(); print(); }}>
     <section class="card rise" style="--i: 2" aria-labelledby="from-title" data-ph-capture-attribute-block="from">
       <div class="card-head with-helper">
         <House size={20} aria-hidden="true" class="head-icon" />
@@ -294,11 +451,19 @@
       </div>
     </section>
 
-    <section class="card rise" style="--i: 3" aria-labelledby="to-title" data-ph-capture-attribute-block="to">
+    <section class="card to-card rise" style="--i: 3" aria-labelledby="to-title" data-ph-capture-attribute-block="to">
       <div class="card-head with-helper">
         <Send size={20} aria-hidden="true" class="head-icon" />
-        <div class="title-line">
+        <div class="title-line to-line">
           <h2 id="to-title" class="card-title">To</h2>
+          <div class="segmented mode" role="group" aria-label="Send to">
+            <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
+              <User size={16} aria-hidden="true" />Single
+            </button>
+            <button type="button" aria-pressed={toMode === 'list'} onclick={() => (toMode = 'list')}>
+              <Table size={16} aria-hidden="true" />From a list
+            </button>
+          </div>
           <span class="print-toggle">
             <span class="print-caption" aria-hidden="true">Print</span>
             <button type="button" class="switch" role="switch" aria-label="Print To address" aria-checked={settings.showRecipient}
@@ -307,15 +472,24 @@
             </button>
           </span>
         </div>
-        <p class="helper">Who you're sending to</p>
+        <p class="helper">{listMode ? 'One envelope per row of your list' : "Who you're sending to"}</p>
       </div>
       {#if !settings.showRecipient}<p class="muted off-note">This address won't print until you turn <strong>Print</strong> on.</p>{/if}
       <div class="card-body" class:off={!settings.showRecipient}>
-        <AddressEditor label="To: recipient address" value={recipient}
-          onchange={(rich) => (recipient = rich)}
-          layout={settings.recipientLayout} onlayout={(l) => update('recipientLayout', l)}
-          {fonts}
-          placeholder={'Jane Doe\n123 Main St\nSpringfield, IL 62701'} />
+        {#if listMode}
+          <DataPanel {dataset} onchange={onDataset} />
+          <AddressEditor label="To: address template" value={mergeTemplate}
+            onchange={onmergetemplate} fields={fieldNames}
+            layout={settings.recipientLayout} onlayout={(l) => update('recipientLayout', l)}
+            {fonts}
+            placeholder={'{{Name}}\n{{Address}}\n{{City}}, {{State}} {{Zip}}'} />
+        {:else}
+          <AddressEditor label="To: recipient address" value={recipient}
+            onchange={(rich) => (recipient = rich)}
+            layout={settings.recipientLayout} onlayout={(l) => update('recipientLayout', l)}
+            {fonts}
+            placeholder={'Jane Doe\n123 Main St\nSpringfield, IL 62701'} />
+        {/if}
         <details class="layout">
           <summary>
             <Move size={20} aria-hidden="true" />
@@ -374,6 +548,12 @@
 
   /* Print switch at the right edge of the card header, centered on the title. */
   .print-toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+  /* To header: the Single | From a list toggle sits left of Print and wraps under the title when narrow. */
+  .to-line { flex-wrap: wrap; row-gap: 8px; }
+  .mode { margin-left: auto; }
+  .mode + .print-toggle { margin-left: 6px; }
+  .segmented.mode { padding: 2px; gap: 2px; }
+  .segmented.mode button { min-height: 30px; padding: 0 12px; gap: 6px; font-size: 13px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
   .switch {
     position: relative;
@@ -447,7 +627,15 @@
     box-shadow: var(--shadow-float);
   }
   .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; }
+  .preview-head { flex-wrap: wrap; row-gap: 8px; }
   .updating { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  /* Record stepper: caption, then ‹ 3 / 42 ›, at the header's right edge. */
+  .record-nav { display: flex; align-items: center; gap: 10px; min-width: 0; margin-left: auto; }
+  .record-caption { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .stepper { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+  .step { width: 36px; min-height: 36px; padding: 0; }
+  .record-pos { min-width: 5ch; text-align: center; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .message :global(.lucide-info) { color: var(--muted); }
 
   /* The envelope scales with the card but stops at 720px wide so a #10 never gets too tall. */
   .stage { display: grid; place-items: center; width: 100%; max-width: 720px; justify-self: center; min-width: 0; }
@@ -484,6 +672,8 @@
   /* Medium: preview full width on top, From and To side by side below it. */
   @media (min-width: 760px) and (max-width: 1179px) {
     .form { grid-template-columns: 1fr 1fr; gap: 24px; }
+    /* The list needs room: in list mode To takes the full width under From. */
+    .form.list .to-card { grid-column: 1 / -1; }
   }
   /* Wide: form left, a larger sticky preview right. */
   @media (min-width: 1180px) {
@@ -501,5 +691,12 @@
   }
   @media (max-width: 480px) {
     .print-caption { display: none; }
+    /* The mode toggle drops to its own row under the title; Print stays beside the title. */
+    .to-line h2 { flex: 1; }
+    .mode { order: 3; margin-left: 0; }
+    /* The header is taller now; keep the icon level with the title. */
+    .to-card .card-head.with-helper :global(.head-icon) { align-self: start; margin-top: 3px; }
+    .mode + .print-toggle { margin-left: auto; }
+    .record-nav { margin-left: 0; width: 100%; justify-content: space-between; }
   }
 </style>

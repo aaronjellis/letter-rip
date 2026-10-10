@@ -69,7 +69,12 @@
       <a href="https://github.com/aaronjellis/letter-rip/blob/main/THIRD_PARTY_LICENSES.md">third-party licenses</a>
       file.
     </p>
-    <p><strong>Coming next:</strong> mail merge from a spreadsheet, and address labels.</p>
+    <p>
+      To print many envelopes, switch To to <strong>From a list</strong>, load a CSV or Excel file or
+      paste cells from a spreadsheet, and build the address from its columns. Letter Rip prints one
+      envelope per row.
+    </p>
+    <p><strong>Coming next:</strong> address labels.</p>
 
     <h2>How to print an envelope</h2>
     <ol>

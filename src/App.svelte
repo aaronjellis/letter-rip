@@ -44,10 +44,11 @@
     </div>
   </header>
 
-  <QuickEnvelope settings={profile.envelope} onsettings={(s) => (profile = { ...profile, envelope: s })} />
+  <QuickEnvelope settings={profile.envelope} onsettings={(s) => (profile = { ...profile, envelope: s })}
+    mergeTemplate={profile.mergeTemplate} onmergetemplate={(t) => (profile = { ...profile, mergeTemplate: t })} />
 
   <footer class="footnote">
-    <p>Need to print many? Mail merge from a spreadsheet is coming next.</p>
+    <p>Need to print many? Switch To to <strong>From a list</strong>.</p>
     <div class="footnote-links">
       <button type="button" class="text-link" onclick={openAbout}>About Letter Rip</button>
       <a class="coffee" href="https://buymeacoffee.com/madebyaaron" target="_blank" rel="noopener">
@@ -104,6 +105,7 @@
     flex-wrap: wrap;
   }
   .footnote p { margin: 0; font-size: 14px; color: var(--muted); }
+  .footnote strong { font-weight: 600; color: var(--text); }
   /* Support link: quiet outlined pill in the app's own system, no third-party script. */
   .coffee {
     display: inline-flex;

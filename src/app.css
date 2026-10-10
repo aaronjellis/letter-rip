@@ -312,3 +312,20 @@ label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500; c
 
 /* Scroll lock while a modal dialog is open (AboutDialog.svelte). */
 html.dialog-open { overflow: hidden; }
+
+/*
+ * Mail merge tokens in the address editor (AddressEditor.svelte), drawn with the CSS Custom
+ * Highlight API so the editable DOM stays plain text. Known fields get a quiet tint; fields with
+ * no matching column get amber.
+ */
+::highlight(merge-token) {
+  background-color: color-mix(in srgb, var(--text) 11%, transparent);
+}
+::highlight(merge-token-unknown) {
+  background-color: rgba(245, 158, 11, 0.26);
+  text-decoration: underline wavy #b4690e;
+}
+:root[data-theme='dark'] ::highlight(merge-token-unknown) {
+  background-color: rgba(245, 178, 91, 0.24);
+  text-decoration-color: #f5b25b;
+}
