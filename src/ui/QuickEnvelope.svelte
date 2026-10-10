@@ -372,6 +372,13 @@
     }, 30_000);
   }
 
+  /** Phones and tablets have no print dialog for a PDF tab; the system share sheet offers Print. */
+  const touchDevice = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  function canShareFiles(file: File): boolean {
+    return typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+      && typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+  }
+
   async function print() {
     if (!canPrint || exporting) return;
     if (lastPrintUrl) {
@@ -381,7 +388,20 @@
     exporting = listMode;
     try {
       error = '';
-      const url = pdfUrl((await build()).bytes);
+      const bytes = (await build()).bytes;
+      if (touchDevice) {
+        const file = new File([bytes as BlobPart], listMode ? 'envelopes.pdf' : 'envelope.pdf', { type: 'application/pdf' });
+        if (canShareFiles(file)) {
+          try {
+            await navigator.share({ files: [file], title: listMode ? 'Envelopes' : 'Envelope' });
+          } catch (err) {
+            // The user closed the sheet; that is not an error.
+            if (!(err instanceof DOMException && err.name === 'AbortError')) throw err;
+          }
+          return;
+        }
+      }
+      const url = pdfUrl(bytes);
       const win = window.open(url, '_blank');
       if (!win) {
         URL.revokeObjectURL(url);
@@ -509,6 +529,9 @@
         {/if}
       {:else if settings.showRecipient && warnings.length > 0}
         <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the To address are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
+      {/if}
+      {#if touchDevice}
+        <p class="muted message status-line print-hint"><Info size={18} aria-hidden="true" /><span>On a phone or tablet, <strong>Print</strong> opens the share sheet. Choose <strong>Print</strong> there, or save the PDF and print it from your files.</span></p>
       {/if}
       <div class="actions">
         {#if listMode && included.length > 0}
