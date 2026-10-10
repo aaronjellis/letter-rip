@@ -819,7 +819,8 @@
     .actions { flex-wrap: nowrap; gap: 8px; min-width: 0; }
     .actions > * { min-width: 0; }
     .actions .stepper { flex: none; gap: 4px; margin-right: auto; }
-    .actions .btn-download { flex: none; width: 44px; padding: 0; justify-content: center; }
+    /* A 48px circle: the same height as Print, so the icon button is round rather than a tall pill. */
+    .actions .btn-download { flex: none; width: 48px; padding: 0; justify-content: center; }
     .actions .btn-download .btn-label { display: none; }
     .actions .btn-primary { flex: 1 1 0; min-width: 0; padding: 0 16px; }
     .actions .btn-primary .btn-label { display: none; }
