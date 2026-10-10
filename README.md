@@ -2,7 +2,7 @@
 
 Address and print envelopes from your browser.
 
-Prints addressed envelopes (and, in later phases, labels and merged letters) from a browser. Built for managed Chromebooks where Google Docs is blocked. No server: everything runs on the device and nothing is uploaded.
+Prints addressed envelopes, singly or merged from a spreadsheet list, from a browser. Labels are next. Built for managed Chromebooks where Google Docs is blocked. No server: everything runs on the device and nothing is uploaded.
 
 ## Use
 
@@ -25,6 +25,30 @@ When you paste text, the box keeps only bold, italic, and line breaks.
 The **From** and **To** switches turn printing on or off for each address.
 
 **Export layout** saves your return address and preferences to `envelope-layout.json`, which you can **Import** on another Chromebook.
+
+## Print many envelopes from a list
+
+To print one envelope per row of a spreadsheet:
+
+1. In the **To** card, choose **From a list**.
+2. Drop a CSV, TSV, or Excel file on the panel. Or click **Paste cells** and paste from any spreadsheet.
+3. Check the table:
+   - Turn **First row is headers** on or off.
+   - For sideways sheets, turn on **Headers run down the first column**.
+   - To rename a header, click it.
+   - To skip a row, clear its checkbox.
+4. Under the table, build the address. Click **Insert field** to add a field such as `{{Name}}`. You can put several fields on one line, for example `{{First}} {{Last}}` or `{{City}}, {{State}} {{Zip}}`.
+5. To check each envelope, use the ‹ › stepper in the preview. Then click **Print N envelopes**.
+
+Notes:
+
+- Your list stays on the device and isn't saved between sessions. The address template is saved.
+- A cell with several lines prints as several lines.
+- A line whose fields are all empty is dropped, so a missing second street line leaves no gap.
+- **Insert field** is available after you load a list.
+- A row with no address text is skipped. The preview shows how many.
+- The table shows the first 200 rows. **Select all** and **Clear** apply to every row.
+- When you include more than 2,000 rows, the app notes that making the PDF may take a while.
 
 ## Fonts
 
