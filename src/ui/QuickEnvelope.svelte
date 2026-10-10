@@ -404,19 +404,21 @@
 
 <div class="workspace">
 <!-- Envelope size spans the full width above the form and the preview. -->
-<div class="card size-card rise" style="--i: 1">
-  <SizePicker {settings} onchange={onsettings} />
-</div>
-
-<!-- What we're printing: one envelope, or one per row of a list. Spans both cards so From and To stay alike. -->
-<div class="mode-bar rise" style="--i: 2">
-  <div class="segmented mode" role="group" aria-label="What to print">
-    <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
-      <User size={16} aria-hidden="true" />One envelope
-    </button>
-    <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
-      <Table size={16} aria-hidden="true" />Many from a list
-    </button>
+<!-- One card for everything about the envelope: one or many, then size. -->
+<section class="card envelope-card rise" style="--i: 1" aria-labelledby="envelope-title">
+  <div class="card-head">
+    <div class="title-line">
+      <Mail size={20} aria-hidden="true" />
+      <h2 id="envelope-title" class="card-title">Envelope</h2>
+      <div class="segmented mode" role="group" aria-label="What to print">
+        <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
+          <User size={16} aria-hidden="true" />One envelope
+        </button>
+        <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
+          <Table size={16} aria-hidden="true" />Many from a list
+        </button>
+      </div>
+    </div>
   </div>
   {#if listMode}
     <!-- The list summary is one pill button that opens the list dialog, plus a small remove button. -->
@@ -440,7 +442,8 @@
       {/if}
     </div>
   {/if}
-</div>
+  <SizePicker {settings} onchange={onsettings} compact />
+</section>
 
 <section class="quick">
   <div class="preview rise" style="--i: 2" bind:this={panel}>
@@ -659,7 +662,7 @@
 
   /* List strip: icon, source · count, then Edit list and Remove, on one line at desktop. */
   /* List chip: same 36px height as the mode control, so the bar reads as one row. */
-  .list-chip-row { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+  .list-chip-row { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
   .list-chip {
     display: inline-flex; align-items: center; gap: 8px; min-height: 40px; max-width: min(100%, 420px);
     padding: 0 12px 0 10px; border-radius: 999px; font-size: 14px; font-weight: 500;
@@ -675,7 +678,8 @@
   .print-toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
   /* To header: the Single | From a list toggle sits left of Print and wraps under the title when narrow. */
   /* Mode bar above the cards: the choice on the left, the list summary on the right. */
-  .mode-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; min-width: 0; }
+  .envelope-card .title-line { flex-wrap: wrap; row-gap: 12px; }
+  .envelope-card .segmented.mode { margin-left: auto; }
   .segmented.mode { padding: 3px; gap: 3px; }
   .segmented.mode button { min-height: 32px; padding: 0 14px; gap: 8px; font-size: 14px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
@@ -834,7 +838,7 @@
      * single-line: a wrapping column flexbox sizes its line to the widest child, so a long chip
      * would push both rows past the screen instead of truncating the list name.
      */
-    .mode-bar { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+    .envelope-card .segmented.mode { margin-left: 0; width: 100%; }
     .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; }
     .segmented.mode button { justify-content: center; }
     .list-chip-row { margin-left: 0; }

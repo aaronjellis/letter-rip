@@ -12,9 +12,10 @@
   import type { EnvelopeSettings } from '../lib/envelopes/build';
   import Ruler from '@lucide/svelte/icons/ruler';
 
-  let { settings, onchange }: {
+  let { settings, onchange, compact = false }: {
     settings: EnvelopeSettings;
     onchange: (s: EnvelopeSettings) => void;
+    compact?: boolean;
   } = $props();
 
   const id = $props.id();
@@ -58,10 +59,14 @@
   }
 </script>
 
-<div class="size-picker">
+<div class="size-picker" class:compact>
   <div class="head title-line">
-    <Ruler size={20} aria-hidden="true" />
-    <label class="title card-title" for="{id}-size">Envelope size</label>
+    {#if compact}
+      <label class="field-label" for="{id}-size">Size</label>
+    {:else}
+      <Ruler size={20} aria-hidden="true" />
+      <label class="title card-title" for="{id}-size">Envelope size</label>
+    {/if}
   </div>
   <select id="{id}-size" value={settings.size} onchange={onSizeChange}>
     {#each groups as g (g.group)}
@@ -104,6 +109,8 @@
   /* The select's label doubles as the card title (styles from .card-title). */
   .head { margin-bottom: 16px; }
   .title { margin: 0; }
+  .field-label { margin: 0; font-size: 14px; font-weight: 500; color: var(--muted); }
+  .compact .head { margin-bottom: 8px; }
   .custom { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 16px; }
   .custom .segmented { height: 48px; align-items: center; }
   .hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 14px; }
