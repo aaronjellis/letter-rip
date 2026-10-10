@@ -692,7 +692,7 @@
   }
   .envelope-controls :global(.size-picker) { flex: 1 1 200px; min-width: 0; max-width: 360px; }
   .segmented.mode { padding: 3px; gap: 3px; }
-  .segmented.mode button { min-height: 32px; padding: 0 14px; gap: 8px; font-size: 14px; }
+  .segmented.mode button { min-height: 40px; padding: 0 14px; gap: 8px; font-size: 14px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
   .switch {
     position: relative;
