@@ -449,7 +449,7 @@
         <Eye size={20} aria-hidden="true" />
         <h2 class="card-title">Preview</h2>
       </div>
-      {#if building || rendering}<p class="updating" aria-live="polite"><LoaderCircle class="spin" size={18} aria-hidden="true" />Updating preview…</p>{/if}
+      {#if building || rendering}<p class="updating" aria-live="polite"><LoaderCircle class="spin" size={18} aria-hidden="true" /><span class="updating-label">Updating preview…</span></p>{/if}
       {#if listMode && included.length > 0}
         <span class="record-caption muted" title={currentCaption}>{currentCaption}</span>
       {/if}
@@ -754,9 +754,13 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-float);
   }
+  /*
+   * One row, always: the updating note comes and goes on every keystroke and record step, so a
+   * wrapping header would push the envelope down and back. The record caption truncates instead.
+   */
   .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; min-width: 0; }
-  .preview-head { flex-wrap: wrap; row-gap: 8px; }
-  .updating { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .preview-head > .title-line { flex: none; }
+  .updating { flex: none; margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
   /* Current record's caption at the header's right edge. */
   .record-caption { margin-left: auto; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; flex: none; }
@@ -833,6 +837,8 @@
   }
   @media (max-width: 480px) {
     .print-caption { display: none; }
+    /* Phone: the updating note is just the spinner; screen readers still hear the text. */
+    .updating-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     /* Tighter mode buttons so "Many from a list" stays on one line down to 320px. */
     .segmented.mode button { gap: 6px; padding: 0 6px; }
     /* Phone: the chip reads "3 of 3 rows" so the list name keeps its room; screen readers still hear "included". */
