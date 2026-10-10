@@ -536,16 +536,8 @@
     <section class="card to-card rise" style="--i: 3" aria-labelledby="to-title" data-ph-capture-attribute-block="to">
       <div class="card-head with-helper">
         <Send size={20} aria-hidden="true" class="head-icon" />
-        <div class="title-line to-line">
+        <div class="title-line">
           <h2 id="to-title" class="card-title">To</h2>
-          <div class="segmented mode" role="group" aria-label="Send to">
-            <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
-              <User size={16} aria-hidden="true" />Single
-            </button>
-            <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
-              <Table size={16} aria-hidden="true" />From a list
-            </button>
-          </div>
           <span class="print-toggle">
             <span class="print-caption" aria-hidden="true">Print</span>
             <button type="button" class="switch" role="switch" aria-label="Print To address" aria-checked={settings.showRecipient}
@@ -555,6 +547,15 @@
           </span>
         </div>
         <p class="helper">{listMode ? 'One envelope per row of your list' : "Who you're sending to"}</p>
+      </div>
+      <!-- Mode tabs: a full-width row under the header, so the title row stays as light as From's. -->
+      <div class="segmented mode" role="group" aria-label="Send to">
+        <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
+          <User size={16} aria-hidden="true" />Single address
+        </button>
+        <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
+          <Table size={16} aria-hidden="true" />From a list
+        </button>
       </div>
       {#if !settings.showRecipient}<p class="muted off-note">This address won't print until you turn <strong>Print</strong> on.</p>{/if}
       <div class="card-body" class:off={!settings.showRecipient}>
@@ -674,11 +675,10 @@
   /* Print switch at the right edge of the card header, centered on the title. */
   .print-toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
   /* To header: the Single | From a list toggle sits left of Print and wraps under the title when narrow. */
-  .to-line { flex-wrap: wrap; row-gap: 8px; }
-  .mode { margin-left: auto; }
-  .mode + .print-toggle { margin-left: 6px; }
-  .segmented.mode { padding: 2px; gap: 2px; }
-  .segmented.mode button { min-height: 30px; padding: 0 12px; gap: 6px; font-size: 13px; }
+  /* Mode tabs span the card; each tab takes half. */
+  .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; margin: 16px 0 0; padding: 3px; gap: 3px; }
+  .segmented.mode button { min-height: 36px; padding: 0 12px; gap: 8px; font-size: 14px; justify-content: center; }
+  .segmented.mode + .card-body, .segmented.mode + .off-note { margin-top: 16px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
   .switch {
     position: relative;
@@ -816,12 +816,6 @@
   }
   @media (max-width: 480px) {
     .print-caption { display: none; }
-    /* The mode toggle drops to its own row under the title; Print stays beside the title. */
-    .to-line h2 { flex: 1; }
-    .mode { order: 3; margin-left: 0; }
-    /* The header is taller now; keep the icon level with the title. */
-    .to-card .card-head.with-helper :global(.head-icon) { align-self: start; margin-top: 3px; }
-    .mode + .print-toggle { margin-left: auto; }
     .actions .stepper { width: 100%; justify-content: center; margin-right: 0; }
   }
 </style>
