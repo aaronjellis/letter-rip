@@ -410,13 +410,17 @@
     <div class="title-line">
       <Mail size={20} aria-hidden="true" />
       <h2 id="envelope-title" class="card-title">Envelope</h2>
-      <div class="segmented mode" role="group" aria-label="What to print">
-        <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
-          <User size={16} aria-hidden="true" />One envelope
-        </button>
-        <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
-          <Table size={16} aria-hidden="true" />Many from a list
-        </button>
+      <!-- Mode and size side by side; the select's options already show the size. -->
+      <div class="envelope-controls">
+        <div class="segmented mode" role="group" aria-label="What to print">
+          <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
+            <User size={16} aria-hidden="true" />One envelope
+          </button>
+          <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
+            <Table size={16} aria-hidden="true" />Many from a list
+          </button>
+        </div>
+        <SizePicker {settings} onchange={onsettings} compact />
       </div>
     </div>
   </div>
@@ -442,7 +446,6 @@
       {/if}
     </div>
   {/if}
-  <SizePicker {settings} onchange={onsettings} compact />
 </section>
 
 <section class="quick">
@@ -679,7 +682,9 @@
   /* To header: the Single | From a list toggle sits left of Print and wraps under the title when narrow. */
   /* Mode bar above the cards: the choice on the left, the list summary on the right. */
   .envelope-card .title-line { flex-wrap: wrap; row-gap: 12px; }
-  .envelope-card .segmented.mode { margin-left: auto; }
+  .envelope-controls { display: flex; align-items: center; gap: 12px; margin-left: auto; min-width: 0; flex-wrap: wrap; }
+  .envelope-controls .segmented.mode { flex: none; }
+  .envelope-controls :global(.size-picker) { flex: 1 1 200px; min-width: 0; max-width: 360px; }
   .segmented.mode { padding: 3px; gap: 3px; }
   .segmented.mode button { min-height: 32px; padding: 0 14px; gap: 8px; font-size: 14px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
@@ -838,7 +843,9 @@
      * single-line: a wrapping column flexbox sizes its line to the widest child, so a long chip
      * would push both rows past the screen instead of truncating the list name.
      */
-    .envelope-card .segmented.mode { margin-left: 0; width: 100%; }
+    .envelope-controls { margin-left: 0; width: 100%; }
+    .envelope-controls .segmented.mode { width: 100%; }
+    .envelope-controls :global(.size-picker) { max-width: none; flex-basis: 100%; }
     .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; }
     .segmented.mode button { justify-content: center; }
     .list-chip-row { margin-left: 0; }

@@ -62,7 +62,7 @@
 <div class="size-picker" class:compact>
   <div class="head title-line">
     {#if compact}
-      <label class="field-label" for="{id}-size">Size</label>
+      <label class="sr-only" for="{id}-size">Envelope size</label>
     {:else}
       <Ruler size={20} aria-hidden="true" />
       <label class="title card-title" for="{id}-size">Envelope size</label>
@@ -109,8 +109,9 @@
   /* The select's label doubles as the card title (styles from .card-title). */
   .head { margin-bottom: 16px; }
   .title { margin: 0; }
-  .field-label { margin: 0; font-size: 14px; font-weight: 500; color: var(--muted); }
-  .compact .head { margin-bottom: 8px; }
+  /* Compact: no visible label; the select's options show the size. */
+  .compact .head { margin: 0; display: contents; }
+  .compact select { min-width: 0; }
   .custom { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 16px; }
   .custom .segmented { height: 48px; align-items: center; }
   .hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 14px; }
@@ -124,7 +125,7 @@
   /* Desktop: one header row, title on the left and the select at the right edge (like the print
      switches). Custom fields appear on a second row, right-aligned under the select. */
   @media (min-width: 760px) {
-    .size-picker {
+    .size-picker:not(.compact) {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
       column-gap: 24px;
