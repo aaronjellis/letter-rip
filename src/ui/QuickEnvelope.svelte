@@ -29,8 +29,6 @@
   import X from '@lucide/svelte/icons/x';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
-  import ChevronsLeft from '@lucide/svelte/icons/chevrons-left';
-  import ChevronsRight from '@lucide/svelte/icons/chevrons-right';
   import Info from '@lucide/svelte/icons/info';
 
   let { settings, onsettings, mergeTemplate, onmergetemplate }: {
@@ -227,7 +225,7 @@
     if (!listMode || included.length === 0 || e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target as HTMLElement | null;
     if (t && (t.closest('input, textarea, select, [contenteditable="true"], dialog[open], [role="listbox"]'))) return;
-    const jump: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, Home: -included.length, End: included.length };
+    const jump: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1 };
     const delta = jump[e.key];
     if (delta === undefined) return;
     e.preventDefault();
@@ -506,20 +504,17 @@
       <div class="actions">
         {#if listMode && included.length > 0}
           <div class="stepper" role="group" aria-label="Preview record">
-            <button type="button" class="step" aria-label="First record" title="First record (Home)" disabled={index === 0}
-              onclick={() => stepRecord(-included.length)}><ChevronsLeft size={18} aria-hidden="true" /></button>
             <button type="button" class="step" aria-label="Previous record" title="Previous record (←)" disabled={index === 0}
               onclick={() => stepRecord(-1)}><ChevronLeft size={18} aria-hidden="true" /></button>
-            <span class="record-pos" aria-live="polite"><span class="sr-only">Record </span>{index + 1} / {included.length}</span>
             <button type="button" class="step" aria-label="Next record" title="Next record (→)" disabled={index >= included.length - 1}
               onclick={() => stepRecord(1)}><ChevronRight size={18} aria-hidden="true" /></button>
-            <button type="button" class="step" aria-label="Last record" title="Last record (End)" disabled={index >= included.length - 1}
-              onclick={() => stepRecord(included.length)}><ChevronsRight size={18} aria-hidden="true" /></button>
+            <span class="sr-only" aria-live="polite">Record {index + 1} of {included.length}</span>
           </div>
         {/if}
-        <button class="btn btn-secondary" type="button" disabled={listMode ? !canPrint || exporting : !pdfBytes} onclick={download}>
+        <button class="btn btn-secondary btn-download" type="button" aria-label={listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}
+          disabled={listMode ? !canPrint || exporting : !pdfBytes} onclick={download}>
           <Download size={20} aria-hidden="true" />
-          {listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}
+          <span class="btn-label">{listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}</span>
         </button>
         <!-- Outside the form, so it submits it through the form attribute. -->
         <button class="btn btn-primary" type="submit" form="envelope-form" disabled={!canPrint || exporting}>
@@ -762,7 +757,6 @@
   .record-caption { margin-left: auto; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; flex: none; }
   .step { width: 36px; min-height: 36px; padding: 0; }
-  .record-pos { min-width: 5ch; text-align: center; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .message :global(.lucide-info) { color: var(--muted); }
 
   /* The envelope scales with the card but stops at 720px wide so a #10 never gets too tall. */
@@ -813,10 +807,20 @@
   }
   @media (max-width: 759px) {
     .summary-hint { display: none; }
-    .actions .btn { flex: 1 1 140px; }
+    /* Phone: buttons share one row. Download is icon-only; Print takes the rest. */
+    .actions { flex-wrap: nowrap; }
+    .actions .btn-download { flex: none; width: 48px; padding: 0; justify-content: center; }
+    .actions .btn-download .btn-label { display: none; }
+    .actions .btn-primary { flex: 1 1 auto; min-width: 0; }
+    .actions .stepper { width: auto; margin-right: auto; }
+    /* Phone: the mode choice stretches full width; the list chip gets its own row. */
+    .mode-bar { flex-direction: column; align-items: stretch; }
+    .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; }
+    .segmented.mode button { justify-content: center; }
+    .list-chip-row { margin-left: 0; }
+    .list-chip { flex: 1 1 auto; max-width: none; justify-content: center; }
   }
   @media (max-width: 480px) {
     .print-caption { display: none; }
-    .actions .stepper { width: 100%; justify-content: center; margin-right: 0; }
   }
 </style>
