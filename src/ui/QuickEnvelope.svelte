@@ -656,13 +656,14 @@
   /* List strip: icon, source · count, then Edit list and Remove, on one line at desktop. */
   .list-strip {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: 8px 12px;
+    gap: 12px;
     min-width: 0;
     margin-left: auto;
   }
-  .strip-text { display: flex; align-items: baseline; flex: 1 1 160px; min-width: 0; margin: 0; font-size: 14px; white-space: nowrap; }
+  .strip-actions { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+  .strip-text { display: flex; align-items: baseline; flex: 0 1 auto; min-width: 0; margin: 0; font-size: 14px; white-space: nowrap; }
   .strip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text); }
   .strip-count { flex: none; font-size: 13px; color: var(--muted); }
   .strip-empty { color: var(--muted); }
