@@ -27,6 +27,8 @@
   import Table from '@lucide/svelte/icons/table';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
+  import ChevronsLeft from '@lucide/svelte/icons/chevrons-left';
+  import ChevronsRight from '@lucide/svelte/icons/chevrons-right';
   import Info from '@lucide/svelte/icons/info';
 
   let { settings, onsettings, mergeTemplate, onmergetemplate }: {
@@ -218,6 +220,18 @@
     current = Math.min(included.length - 1, Math.max(0, index + delta));
   }
 
+  /** Arrow keys step through records unless the user is typing somewhere or a dialog is open. */
+  function onRecordKeys(e: KeyboardEvent) {
+    if (!listMode || included.length === 0 || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.closest('input, textarea, select, [contenteditable="true"], dialog[open], [role="listbox"]'))) return;
+    const jump: Record<string, number> = { ArrowLeft: -1, ArrowRight: 1, Home: -included.length, End: included.length };
+    const delta = jump[e.key];
+    if (delta === undefined) return;
+    e.preventDefault();
+    stepRecord(delta);
+  }
+
   function pdfUrl(bytes: Uint8Array): string {
     return URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   }
@@ -386,6 +400,8 @@
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 </script>
 
+<svelte:window onkeydown={onRecordKeys} />
+
 <div class="workspace">
 <!-- Envelope size spans the full width above the form and the preview. -->
 <div class="card size-card rise" style="--i: 1">
@@ -401,20 +417,17 @@
       </div>
       {#if building || rendering}<p class="updating" aria-live="polite"><LoaderCircle class="spin" size={18} aria-hidden="true" />Updating preview…</p>{/if}
       {#if listMode && included.length > 0}
-        <div class="record-nav">
-          <span class="record-caption muted" title={currentCaption}>{currentCaption}</span>
-          <div class="stepper" role="group" aria-label="Preview record">
-            <button type="button" class="step" aria-label="Previous record" disabled={index === 0}
-              onclick={() => stepRecord(-1)}><ChevronLeft size={18} aria-hidden="true" /></button>
-            <span class="record-pos" aria-live="polite"><span class="sr-only">Record </span>{index + 1} / {included.length}</span>
-            <button type="button" class="step" aria-label="Next record" disabled={index >= included.length - 1}
-              onclick={() => stepRecord(1)}><ChevronRight size={18} aria-hidden="true" /></button>
-          </div>
-        </div>
+        <span class="record-caption muted" title={currentCaption}>{currentCaption}</span>
       {/if}
     </div>
     <!-- The stage reserves the envelope's shape so the panel does not jump between renders. -->
-    <div class="stage" bind:this={stage} style:aspect-ratio={`${size.widthIn} / ${size.heightIn}`}>
+    <!-- In list mode the preview is a keyboard-navigable carousel of records (arrow keys), so it takes focus. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div class="stage" bind:this={stage} style:aspect-ratio={`${size.widthIn} / ${size.heightIn}`}
+      role={listMode && included.length > 0 ? 'region' : undefined}
+      aria-roledescription={listMode && included.length > 0 ? 'carousel' : undefined}
+      tabindex={listMode && included.length > 0 ? 0 : undefined}
+      aria-label={listMode && included.length > 0 ? 'Envelope preview. Use the left and right arrow keys to move through records.' : undefined}>
       {#if pdfBytes}
         <!-- ARIA allows any role on <canvas>; Svelte's rule treats it as interactive, which it is not here. -->
         <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
@@ -455,6 +468,19 @@
         <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in the To address are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
       {/if}
       <div class="actions">
+        {#if listMode && included.length > 0}
+          <div class="stepper" role="group" aria-label="Preview record">
+            <button type="button" class="step" aria-label="First record" title="First record (Home)" disabled={index === 0}
+              onclick={() => stepRecord(-included.length)}><ChevronsLeft size={18} aria-hidden="true" /></button>
+            <button type="button" class="step" aria-label="Previous record" title="Previous record (←)" disabled={index === 0}
+              onclick={() => stepRecord(-1)}><ChevronLeft size={18} aria-hidden="true" /></button>
+            <span class="record-pos" aria-live="polite"><span class="sr-only">Record </span>{index + 1} / {included.length}</span>
+            <button type="button" class="step" aria-label="Next record" title="Next record (→)" disabled={index >= included.length - 1}
+              onclick={() => stepRecord(1)}><ChevronRight size={18} aria-hidden="true" /></button>
+            <button type="button" class="step" aria-label="Last record" title="Last record (End)" disabled={index >= included.length - 1}
+              onclick={() => stepRecord(included.length)}><ChevronsRight size={18} aria-hidden="true" /></button>
+          </div>
+        {/if}
         <button class="btn btn-secondary" type="button" disabled={listMode ? !canPrint || exporting : !pdfBytes} onclick={download}>
           <Download size={20} aria-hidden="true" />
           {listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}
@@ -699,6 +725,7 @@
   .layout summary::-webkit-details-marker { display: none; }
   .layout summary:hover { background: var(--hover); }
   .layout summary:focus-visible { outline-offset: -2px; }
+  .stage:focus-visible { outline: 2px solid var(--text); outline-offset: 4px; border-radius: 6px; }
   .layout[open] summary { border-radius: 0; }
   .layout summary :global(.lucide-move) { color: var(--text-soft); }
   .summary-title { font-size: 15px; font-weight: 600; }
@@ -709,7 +736,9 @@
   .note { margin: 0 0 16px; font-size: 14px; }
 
   .action-bar { display: grid; gap: 12px; padding-top: 4px; }
-  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px; }
+  /* Record stepper sits at the bottom left, opposite the primary actions. */
+  .actions .stepper { margin-right: auto; }
   .message { margin: 0; font-size: 14px; }
   .message :global(.lucide-triangle-alert) { color: #b4690e; }
   :global(:root[data-theme='dark']) .message :global(.lucide-triangle-alert) { color: #f5b25b; }
@@ -728,9 +757,8 @@
   .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; }
   .preview-head { flex-wrap: wrap; row-gap: 8px; }
   .updating { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
-  /* Record stepper: caption, then ‹ 3 / 42 ›, at the header's right edge. */
-  .record-nav { display: flex; align-items: center; gap: 10px; min-width: 0; margin-left: auto; }
-  .record-caption { min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  /* Current record's caption at the header's right edge. */
+  .record-caption { margin-left: auto; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; flex: none; }
   .step { width: 36px; min-height: 36px; padding: 0; }
   .record-pos { min-width: 5ch; text-align: center; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -794,6 +822,6 @@
     /* The header is taller now; keep the icon level with the title. */
     .to-card .card-head.with-helper :global(.head-icon) { align-self: start; margin-top: 3px; }
     .mode + .print-toggle { margin-left: auto; }
-    .record-nav { margin-left: 0; width: 100%; justify-content: space-between; }
+    .actions .stepper { width: 100%; justify-content: center; margin-right: 0; }
   }
 </style>
