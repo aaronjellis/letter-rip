@@ -345,7 +345,9 @@
 </div>
 
 <style>
-  .data-panel { display: grid; gap: 12px; min-width: 0; }
+  /* A column that fills the dialog body; only the table shrinks when the dialog is short. */
+  .data-panel { display: flex; flex-direction: column; flex: 1 1 auto; gap: 12px; min-width: 0; min-height: 0; }
+  .data-panel > * { flex: none; }
   .loader { display: grid; gap: 10px; }
 
   .drop {
@@ -423,6 +425,8 @@
   .switch[aria-checked='true']::after { transform: translateX(18px); }
 
   /* The table scrolls inside its own frame in both directions; the dialog body never has to. */
+  /* In a short dialog the table gives up height first, down to the header and a few rows. */
+  .data-panel > .table-wrap { flex: 0 1 auto; min-height: 140px; }
   .table-wrap {
     max-height: 50vh;
     overflow: auto;

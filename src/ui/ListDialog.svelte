@@ -112,25 +112,31 @@
   .close:hover:not(:disabled) { background: var(--subtle); border-color: transparent; color: var(--text); }
   :global(:root[data-theme='dark']) .close:hover:not(:disabled) { background: var(--hover); }
 
-  /* Only the panel scrolls; the title and the Done row stay put. */
+  /*
+   * Only the panel scrolls; the title and the Done row stay put. The body is a flex column so the
+   * list table (DataPanel.svelte) can give up height first, and the body scrolls only if even the
+   * table's minimum does not fit.
+   */
   .body {
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 16px 24px 20px;
   }
 
+  /* One row: on a narrow phone the summary wraps inside itself rather than pushing Done down. */
   .foot {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
     gap: 12px 16px;
     padding: 14px 24px;
     border-top: 1px solid var(--divider);
   }
-  .summary { margin: 0 auto 0 0; font-size: 14px; color: var(--muted); }
-  .done { min-width: 96px; }
+  .summary { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 14px; color: var(--muted); }
+  .done { flex: none; min-width: 96px; }
 
   @media (max-width: 480px) {
     .head { padding-left: 16px; }
