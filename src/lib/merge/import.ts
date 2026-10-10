@@ -11,11 +11,15 @@
  *   ds = renameColumn(ds, 'c1', 'Town')     // setIncluded, setHeaderRow, setTransposed, ...
  *   record = recordFromRow(ds, r)           // { Name: 'Ada', Town: 'London' }
  */
+import { fieldKey } from './render';
+
+/** Re-exported from `render.ts`, which owns record building; a `Dataset` is a valid row source. */
+export { recordFromRow } from './render';
 
 export type Column = {
   /** Stable positional id, `c0`, `c1`, ... */
   id: string;
-  /** The user's name for the column; unique ignoring case. */
+  /** The user's name for the column: no braces, and unique ignoring case and inner spacing. */
   name: string;
   /** The name assigned on load. Equal to `name` until the user renames the column. */
   originalName: string;
@@ -51,6 +55,7 @@ export type Delimiter = '\t' | ',' | ';' | (string & {});
 
 export const UNREADABLE_FILE = "Couldn't read that file. Use CSV, TSV, or Excel.";
 export const NO_ROWS = 'That workbook has no rows.';
+export const READER_UNAVAILABLE = "Couldn't load the spreadsheet reader. Check your connection and try again.";
 
 /** An import failure whose `message` is ready to show the user. */
 export class ImportError extends Error {
@@ -65,6 +70,7 @@ export class ImportError extends Error {
 
 const CANDIDATES = ['\t', ',', ';'] as const;
 const SAMPLE_LINES = 20;
+const SAMPLE_CHARS = 64 * 1024;
 
 /** Count `ch` in `line`, ignoring characters inside double quotes. */
 function countOutsideQuotes(line: string, ch: string): number {
@@ -82,9 +88,21 @@ function countOutsideQuotes(line: string, ch: string): number {
  * A delimiter that appears the same number of times on every sampled line wins; ties and
  * inconsistent counts go to the highest total, then to tab, comma, semicolon in that order.
  * Text with none of them is one column (returns tab, which then never splits).
+ * Only the first 64 KB is sampled; a line cut off by that limit is left out.
  */
 export function detectDelimiter(text: string): Delimiter {
-  const lines = stripBom(text)
+  return detectIn(stripBom(text));
+}
+
+/** `detectDelimiter` on text whose BOM is already stripped. */
+function detectIn(text: string): Delimiter {
+  let sample = text;
+  if (text.length > SAMPLE_CHARS) {
+    sample = text.slice(0, SAMPLE_CHARS);
+    const lastBreak = Math.max(sample.lastIndexOf('\n'), sample.lastIndexOf('\r'));
+    if (lastBreak > 0) sample = sample.slice(0, lastBreak);
+  }
+  const lines = sample
     .split(/\r\n|\n|\r/)
     .filter((l) => l.trim() !== '')
     .slice(0, SAMPLE_LINES);
@@ -113,11 +131,13 @@ function stripBom(text: string): string {
  * Parse delimited text per RFC 4180: double-quoted fields may contain the delimiter, `""`, and
  * line breaks; rows end at CRLF, LF, or CR. A leading BOM is stripped and a final line break
  * doesn't add a row. Fields are returned as written (not trimmed); `buildDataset` trims.
+ * Lenient where spreadsheets are: spaces before an opening quote are skipped (`a, "b,c"`), an
+ * unclosed quote runs to the end of the text, and stray quotes mid-field are kept literally.
  * Without `delimiter`, see `detectDelimiter`.
  */
 export function parseDelimited(text: string, opts: { delimiter?: Delimiter } = {}): string[][] {
   const src = stripBom(text);
-  const delim = opts.delimiter ?? detectDelimiter(src);
+  const delim = opts.delimiter ?? detectIn(src);
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -152,9 +172,17 @@ export function parseDelimited(text: string, opts: { delimiter?: Delimiter } = {
       i++;
       continue;
     }
-    if (c === '"' && fieldStart) {
-      quoted = true;
+    if (fieldStart && (c === '"' || (c === ' ' && !src.startsWith(delim, i)))) {
+      // Skip spaces before an opening quote; without a quote, the spaces are field text.
+      let j = i;
+      while (src[j] === ' ' && !src.startsWith(delim, j)) j++;
       fieldStart = false;
+      if (src[j] === '"') {
+        quoted = true;
+        i = j + 1;
+        continue;
+      }
+      field += c;
       i++;
     } else if (src.startsWith(delim, i)) {
       endField();
@@ -178,18 +206,43 @@ export function parseDelimited(text: string, opts: { delimiter?: Delimiter } = {
 // Workbooks
 
 /**
+ * Load SheetJS on demand, plus its codepage tables so legacy `.xls` files decode non-ASCII text.
+ * The tables are optional: if they fail to load, parsing goes on without them.
+ * @throws ImportError with `READER_UNAVAILABLE` when SheetJS itself can't be loaded (for example,
+ * offline after a deploy replaced the chunk).
+ */
+async function loadReader(): Promise<typeof import('xlsx')> {
+  const [xlsx, cptable] = await Promise.allSettled([import('xlsx'), import('xlsx/dist/cpexcel.full.mjs')]);
+  if (xlsx.status === 'rejected') throw new ImportError(READER_UNAVAILABLE, { cause: xlsx.reason });
+  if (cptable.status === 'fulfilled') {
+    try {
+      xlsx.value.set_cptable(cptable.value);
+    } catch {
+      // Without codepages, only legacy files with non-ASCII text are affected.
+    }
+  }
+  return xlsx.value;
+}
+
+/**
  * Read an Excel (or any SheetJS-supported) workbook. Cells come back as their displayed,
  * formatted strings (`raw: false`), so ZIP codes keep leading zeros and dates keep their format.
  * Sheets with no non-empty cell are left out.
- * @throws ImportError with `UNREADABLE_FILE` or `NO_ROWS`.
+ * @throws ImportError with `READER_UNAVAILABLE`, `UNREADABLE_FILE`, or `NO_ROWS`.
  */
 export async function parseWorkbook(
   bytes: ArrayBuffer | Uint8Array,
 ): Promise<{ sheets: { name: string; cells: string[][] }[] }> {
-  const XLSX = await import('xlsx');
+  const XLSX = await loadReader();
   let wb: import('xlsx').WorkBook;
   try {
-    wb = XLSX.read(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { type: 'array' });
+    wb = XLSX.read(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), {
+      type: 'array',
+      raw: false,
+      cellFormula: false,
+      cellHTML: false,
+      dense: true,
+    });
   } catch (err) {
     throw new ImportError(UNREADABLE_FILE, { cause: err });
   }
@@ -235,48 +288,73 @@ export function transpose(cells: readonly (readonly string[])[]): string[][] {
 
 const NUMERIC_RE = /^[-+(]?[$€£¥]?\s*\d[\d,.\s/:-]*%?\)?$/;
 
+/** Trim every cell and drop rows that are then empty. */
+function trimmedRows(cells: readonly (readonly string[])[]): string[][] {
+  return cells.map((r) => r.map((c) => (c ?? '').trim())).filter((r) => !isEmptyRow(r));
+}
+
 /**
- * Whether the first non-empty row looks like column labels: no empty cells (across the full
- * table width), no duplicates ignoring case, more than half the cells non-numeric, and at least
- * one non-empty row after it. Numbers, money, percentages, and dates count as numeric.
+ * Whether the first non-empty row looks like column labels: at least two columns, no empty cells
+ * (across the table's used width, ignoring trailing columns empty everywhere), no duplicates
+ * ignoring case and inner spacing, more than half the cells non-numeric, and at least one non-empty
+ * row after it. Numbers, money, percentages, and dates count as numeric.
  */
 export function detectHeaderRow(cells: readonly (readonly string[])[]): boolean {
-  const rows = cells.filter((r) => !isEmptyRow(r));
+  const rows = trimmedRows(cells);
   if (rows.length < 2) return false;
-  const width = maxOf(rows, (r) => r.length);
-  const first = Array.from({ length: width }, (_, c) => (rows[0][c] ?? '').trim());
+  const width = maxOf(rows, usedWidth);
+  if (width < 2) return false;
+  const first = Array.from({ length: width }, (_, c) => rows[0][c] ?? '');
   if (first.some((c) => c === '')) return false;
-  if (new Set(first.map((c) => c.toLowerCase())).size !== first.length) return false;
+  if (new Set(first.map(fieldKey)).size !== first.length) return false;
   const numeric = first.filter((c) => NUMERIC_RE.test(c)).length;
   return numeric * 2 < first.length;
 }
 
-/** `name`, or `name 2`, `name 3`, ... whichever is free in `taken` (lower-cased names). */
-function uniqueName(name: string, taken: Set<string>): string {
-  let candidate = name;
-  for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${name} ${n}`;
-  return candidate;
+/** A column name that works inside a `{{token}}`: braces removed, outer spaces trimmed. */
+function tokenSafe(name: string): string {
+  return name.replace(/[{}]/g, '').trim();
+}
+
+/**
+ * Hands out unique names: `name`, or `name 2`, `name 3`, ... whichever is free, comparing by
+ * `fieldKey` (case and inner spacing ignored). Per-name suffix counters keep many duplicates linear.
+ */
+function nameAllocator(existing: Iterable<string> = []) {
+  const taken = new Set<string>();
+  for (const name of existing) taken.add(fieldKey(name));
+  const next = new Map<string, number>();
+  return (name: string): string => {
+    const key = fieldKey(name);
+    let candidate = name;
+    if (taken.has(key)) {
+      let n = next.get(key) ?? 2;
+      while (taken.has(fieldKey(`${name} ${n}`))) n++;
+      next.set(key, n + 1);
+      candidate = `${name} ${n}`;
+    }
+    taken.add(fieldKey(candidate));
+    return candidate;
+  };
 }
 
 /**
  * Shape raw cells into a dataset: transpose first (if asked), trim every cell, drop empty rows,
  * drop trailing columns that are empty everywhere, and pad ragged rows. Column names come from
- * the header row or are `Column N` (1-based); empty headers become `Column N` and duplicates
- * (ignoring case) get ` 2`, ` 3`, ... Every row starts included.
+ * the header row or are `Column N` (1-based). Braces are removed from header names so every name
+ * works as a `{{token}}`; headers left empty become `Column N`, and duplicates (ignoring case and
+ * inner spacing) get ` 2`, ` 3`, ... Every row starts included.
  */
 export function buildDataset(cells: readonly (readonly string[])[], opts: BuildOptions): Dataset {
-  const shaped = (opts.transposed ? transpose(cells) : cells)
-    .map((r) => r.map((c) => (c ?? '').trim()))
-    .filter((r) => !isEmptyRow(r));
+  const shaped = trimmedRows(opts.transposed ? transpose(cells) : cells);
   const width = maxOf(shaped, usedWidth);
   const padded = shaped.map((r) => Array.from({ length: width }, (_, c) => r[c] ?? ''));
 
   const header = opts.headerRow && padded.length > 0 ? padded[0] : null;
   const rows = header ? padded.slice(1) : padded;
-  const taken = new Set<string>();
+  const allocate = nameAllocator();
   const columns: Column[] = Array.from({ length: width }, (_, c) => {
-    const name = uniqueName(header?.[c] || `Column ${c + 1}`, taken);
-    taken.add(name.toLowerCase());
+    const name = allocate(tokenSafe(header?.[c] ?? '') || `Column ${c + 1}`);
     return { id: `c${c}`, name, originalName: name };
   });
 
@@ -308,15 +386,16 @@ function rebuild(ds: Dataset, change: Partial<Pick<BuildOptions, 'headerRow' | '
 // Edits (all return a new Dataset)
 
 /**
- * Rename a column. The name is trimmed; an empty name restores `originalName`; a name another
- * column already uses (ignoring case) gets a ` 2`, ` 3`, ... suffix. Read the resulting name
- * back from the returned dataset (for example, to rewrite template tokens).
+ * Rename a column. Braces are removed and the name is trimmed; an empty name restores
+ * `originalName`; a name another column already uses (ignoring case and inner spacing) gets a
+ * ` 2`, ` 3`, ... suffix. Read the resulting name back from the returned dataset (for example, to
+ * rewrite template tokens).
  */
 export function renameColumn(ds: Dataset, id: string, name: string): Dataset {
   const col = ds.columns.find((c) => c.id === id);
   if (!col) return ds;
-  const taken = new Set(ds.columns.filter((c) => c.id !== id).map((c) => c.name.toLowerCase()));
-  const next = uniqueName(name.trim() || col.originalName, taken);
+  const allocate = nameAllocator(ds.columns.filter((c) => c.id !== id).map((c) => c.name));
+  const next = allocate(tokenSafe(name) || col.originalName);
   return { ...ds, columns: ds.columns.map((c) => (c.id === id ? { ...c, name: next } : c)) };
 }
 
@@ -352,14 +431,4 @@ export function setHeaderRow(ds: Dataset, on: boolean): Dataset {
  */
 export function setTransposed(ds: Dataset, on: boolean): Dataset {
   return rebuild(ds, { transposed: on });
-}
-
-/** Row `r` as `{ [column name]: value }`, keyed by current column names. Missing rows give ''. */
-export function recordFromRow(ds: Dataset, r: number): Record<string, string> {
-  const row = ds.rows[r] ?? [];
-  const record: Record<string, string> = {};
-  ds.columns.forEach((col, c) => {
-    record[col.name] = row[c] ?? '';
-  });
-  return record;
 }

@@ -1,11 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   parseDelimited, detectDelimiter, parseWorkbook, detectHeaderRow, transpose, buildDataset,
   renameColumn, setIncluded, setAllIncluded, setHeaderRow, setTransposed, recordFromRow,
-  includedCount, ImportError, UNREADABLE_FILE, NO_ROWS,
+  includedCount, ImportError, UNREADABLE_FILE, NO_ROWS, READER_UNAVAILABLE,
 } from '../../src/lib/merge/import';
+import { recordFromRow as renderRecordFromRow, renderTemplate } from '../../src/lib/merge/render';
+import { plainToRich, richToPlain } from '../../src/lib/richtext';
 
 const fixture = (name: string) =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`../fixtures/merge/${name}`, import.meta.url))));
@@ -67,6 +69,23 @@ describe('parseDelimited', () => {
     expect(parseDelimited('')).toEqual([]);
     expect(parseDelimited('﻿')).toEqual([]);
   });
+
+  it('ends an unclosed quoted field at the end of the text', () => {
+    expect(parseDelimited('a,"b\nc,d')).toEqual([['a', 'b\nc,d']]);
+    expect(parseDelimited('"abc', { delimiter: ',' })).toEqual([['abc']]);
+  });
+
+  it('treats a quote after leading spaces as a quoted field', () => {
+    expect(parseDelimited('a, "b,c"\nd,  "e ""f"" g"\n')).toEqual([['a', 'b,c'], ['d', 'e "f" g']]);
+  });
+
+  it('keeps leading spaces when no quote follows them', () => {
+    expect(parseDelimited('a,  b\n', { delimiter: ',' })).toEqual([['a', '  b']]);
+  });
+
+  it('still splits on a space delimiter', () => {
+    expect(parseDelimited('a  "b c"', { delimiter: ' ' })).toEqual([['a', '', 'b c']]);
+  });
 });
 
 describe('detectDelimiter', () => {
@@ -84,6 +103,15 @@ describe('detectDelimiter', () => {
 
   it('skips leading blank lines', () => {
     expect(detectDelimiter('\n\n  \na\tb\nc\td')).toBe('\t');
+  });
+
+  it('samples only the first 64 KB, ignoring a partial last line', () => {
+    const text = 'a\tb\nc\td\n' + 'x,'.repeat(40_000) + '\n' + 'y,'.repeat(40_000);
+    expect(detectDelimiter(text)).toBe('\t');
+  });
+
+  it('strips a BOM before counting', () => {
+    expect(detectDelimiter('\ufeffa;b\nc;d')).toBe(';');
   });
 });
 
@@ -117,6 +145,16 @@ describe('detectHeaderRow', () => {
 
   it('skips leading empty rows', () => {
     expect(detectHeaderRow([['', ''], ['Name', 'City'], ['Ada', 'London']])).toBe(true);
+  });
+
+  it('is false for a single column', () => {
+    expect(detectHeaderRow([['Name'], ['Ada'], ['Alan']])).toBe(false);
+    expect(detectHeaderRow([['Name', ''], ['Ada', '  ']])).toBe(false);
+  });
+
+  it('ignores trailing columns that are empty everywhere', () => {
+    expect(detectHeaderRow([['Name', 'City', '', ' '], ['Ada', 'London', '', '']])).toBe(true);
+    expect(detectHeaderRow([[' Name ', 'City  '], ['Ada', 'London']])).toBe(true);
   });
 });
 
@@ -195,6 +233,27 @@ describe('buildDataset', () => {
     expect(empty.rows).toEqual([]);
   });
 
+  it('strips braces from header names so they work as tokens', () => {
+    const ds = buildDataset([['{{Name}}', 'Ci{t}y', '{}', '{ }'], ['a', 'b', 'c', 'd']], opts);
+    expect(ds.columns.map((c) => c.name)).toEqual(['Name', 'City', 'Column 3', 'Column 4']);
+  });
+
+  it('dedupes names that differ only by case or inner spaces', () => {
+    const ds = buildDataset([['Zip Code', 'zip  code', 'ZIP CODE'], ['1', '2', '3']], opts);
+    expect(ds.columns.map((c) => c.name)).toEqual(['Zip Code', 'zip  code 2', 'ZIP CODE 3']);
+  });
+
+  it('dedupes 10,000 duplicate headers quickly', () => {
+    const header = Array.from({ length: 10_000 }, () => 'Name');
+    const t0 = performance.now();
+    const ds = buildDataset([header, header.map(() => 'x')], opts);
+    expect(performance.now() - t0).toBeLessThan(200);
+    expect(ds.columns[0].name).toBe('Name');
+    expect(ds.columns[1].name).toBe('Name 2');
+    expect(ds.columns[9_999].name).toBe('Name 10000');
+    expect(new Set(ds.columns.map((c) => c.name.toLowerCase())).size).toBe(10_000);
+  });
+
   it('carries sheet info for workbooks', () => {
     const ds = buildDataset([['a']], { ...opts, sheetNames: ['One', 'Two'], activeSheet: 'Two' });
     expect(ds.sheetNames).toEqual(['One', 'Two']);
@@ -225,6 +284,13 @@ describe('dataset edits', () => {
     const ds = renameColumn(base(), 'c1', 'name');
     expect(ds.columns[1].name).toBe('name 2');
     expect(renameColumn(base(), 'c0', 'NAME').columns[0].name).toBe('NAME');
+  });
+
+  it('renameColumn strips braces and dedupes on the token key', () => {
+    expect(renameColumn(base(), 'c1', ' {{Town}} ').columns[1].name).toBe('Town');
+    expect(renameColumn(base(), 'c1', '{{}}').columns[1].name).toBe('City');
+    const ds = buildDataset([['Zip Code', 'City'], ['1', '2']], { sourceName: 'x', headerRow: true, transposed: false });
+    expect(renameColumn(ds, 'c1', 'zip   CODE').columns[1].name).toBe('zip   CODE 2');
   });
 
   it('renameColumn ignores unknown ids', () => {
@@ -266,6 +332,17 @@ describe('dataset edits', () => {
     const ds = renameColumn(base(), 'c1', 'Town');
     expect(recordFromRow(ds, 1)).toEqual({ Name: 'Alan', Town: 'Wilmslow' });
     expect(recordFromRow(ds, 99)).toEqual({ Name: '', Town: '' });
+  });
+
+  it('recordFromRow is the render implementation', () => {
+    expect(recordFromRow).toBe(renderRecordFromRow);
+  });
+
+  it('renders a __proto__ column', () => {
+    const ds = buildDataset([['__proto__', 'constructor'], ['a', 'b']], { sourceName: 'x', headerRow: true, transposed: false });
+    const record = recordFromRow(ds, 0);
+    expect(Object.keys(record)).toEqual(['__proto__', 'constructor']);
+    expect(richToPlain(renderTemplate(plainToRich('{{__proto__}} {{Constructor}}'), record))).toBe('a b');
   });
 });
 
@@ -318,5 +395,24 @@ describe('parseWorkbook', () => {
 
   it('rejects a workbook with no rows', async () => {
     await expect(parseWorkbook(new Uint8Array(0))).rejects.toThrow(NO_ROWS);
+  });
+});
+
+describe('parseWorkbook when the reader fails to load', () => {
+  afterEach(() => {
+    vi.doUnmock('xlsx');
+    vi.resetModules();
+  });
+
+  it('throws an ImportError instead of a raw load error', async () => {
+    vi.resetModules();
+    vi.doMock('xlsx', () => {
+      throw new TypeError('Failed to fetch dynamically imported module');
+    });
+    const fresh = await import('../../src/lib/merge/import');
+    const err = await fresh.parseWorkbook(fixture('sample.xlsx')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(fresh.ImportError);
+    expect((err as Error).message).toBe(READER_UNAVAILABLE);
+    expect((err as Error).cause).toBeInstanceOf(Error);
   });
 });

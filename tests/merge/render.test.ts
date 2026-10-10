@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  TOKEN_RE, findTokens, renderTemplate, renameTokens, unknownTokens, recordFromRow,
+  TOKEN_RE, tokenRegex, findTokens, renderTemplate, renameTokens, unknownTokens, recordFromRow,
 } from '../../src/lib/merge/render';
 import { htmlToRich, normalizeRich, plainToRich, richToHtml, richToPlain, type RichText } from '../../src/lib/richtext';
 
@@ -13,10 +13,32 @@ const RECORD = {
 };
 
 describe('TOKEN_RE', () => {
-  it('is global and captures the field name without surrounding spaces', () => {
+  it('is global and captures the text between the braces', () => {
     expect(TOKEN_RE.flags).toContain('g');
-    const names = [...'{{ First Name }} and {{Zip}}'.matchAll(TOKEN_RE)].map((m) => m[1]);
+    const names = [...'{{ First Name }} and {{Zip}}'.matchAll(TOKEN_RE)].map((m) => m[1].trim());
     expect(names).toEqual(['First Name', 'Zip']);
+  });
+});
+
+describe('tokenRegex', () => {
+  it('returns a fresh global regex each call, matching like TOKEN_RE', () => {
+    const a = tokenRegex();
+    const b = tokenRegex();
+    expect(a).not.toBe(b);
+    expect(a.flags).toContain('g');
+    expect(a.source).toBe(TOKEN_RE.source);
+    a.exec('{{A}} {{B}}');
+    expect(a.lastIndex).toBeGreaterThan(0);
+    expect(b.lastIndex).toBe(0);
+  });
+
+  it('matches in linear time on an unclosed token followed by many spaces', () => {
+    const text = '{{' + ' '.repeat(5000);
+    const t0 = performance.now();
+    expect([...text.matchAll(tokenRegex())]).toEqual([]);
+    expect(findTokens(plain(text))).toEqual([]);
+    expect(richToPlain(renderTemplate(plain(text + 'x'), {}))).toBe('{{' + ' '.repeat(5000) + 'x');
+    expect(performance.now() - t0).toBeLessThan(50);
   });
 });
 
@@ -81,8 +103,22 @@ describe('renderTemplate', () => {
     expect(render('{{Name}}\n\n{{City}}', { Name: 'A', City: 'C' })).toBe('A\n\nC');
   });
 
-  it('does not suppress a line whose literal text is only punctuation once its tokens fill', () => {
-    expect(render('{{City}}, {{State}}', { City: '', State: '' })).toBe(',');
+  it('removes a token line left with only punctuation when every token is empty', () => {
+    expect(render('{{Name}}\n{{City}}, {{State}}', { Name: 'A', City: '', State: '' })).toBe('A');
+  });
+
+  it('keeps a token line with a letter or digit in its literal text', () => {
+    expect(render('{{Name}}\nAttn: {{Contact}}', { Name: 'Acme', Contact: '' })).toBe('Acme\nAttn:');
+    expect(render('{{Name}}\nUnit 4 {{Suite}}', { Name: 'Acme' })).toBe('Acme\nUnit 4');
+  });
+
+  it('keeps a line whose token value is punctuation', () => {
+    expect(render('{{Name}}\n{{Dash}}', { Name: 'A', Dash: '-' })).toBe('A\n-');
+  });
+
+  it('keeps an unknown token line when unknown tokens stay as written', () => {
+    const out = renderTemplate(plain('{{Nickname}}'), {}, { unknownAsEmpty: false });
+    expect(richToPlain(out)).toBe('{{Nickname}}');
   });
 
   it('inserts values literally, without re-expanding tokens or $ patterns', () => {
@@ -145,6 +181,35 @@ describe('renderTemplate', () => {
 
   it('uses the first of several keys that match the same field', () => {
     expect(render('{{zip}}', { Zip: '1', ZIP: '2' })).toBe('1');
+  });
+
+  it('splits a multi-line value into separate lines', () => {
+    expect(render('{{Name}}\n{{Address}}\n{{City}}', { Name: 'Jane', Address: '12 Elm St\nApt 4', City: 'X' }))
+      .toBe('Jane\n12 Elm St\nApt 4\nX');
+  });
+
+  it('splits on CRLF and CR, and drops empty lines from the value', () => {
+    expect(render('{{Address}}', { Address: 'A\r\n\r\nB\rC\n' })).toBe('A\nB\nC');
+  });
+
+  it('keeps run styles and the line size on every split line', () => {
+    const rich: RichText = {
+      lines: [{ runs: [{ text: 'To ' }, { text: '{{Address}}', bold: true }, { text: ' (home)', italic: true }], size: 14 }],
+    };
+    expect(renderTemplate(rich, { Address: '12 Elm St\nApt 4' })).toEqual({
+      lines: [
+        { runs: [{ text: 'To ' }, { text: '12 Elm St', bold: true }], size: 14 },
+        { runs: [{ text: 'Apt 4', bold: true }, { text: ' (home)', italic: true }], size: 14 },
+      ],
+    });
+  });
+
+  it('maps tabs in values to spaces', () => {
+    expect(render('{{Name}}', { Name: 'Ada\tLovelace' })).toBe('Ada Lovelace');
+  });
+
+  it('decides blank-line removal before splitting a value', () => {
+    expect(render('{{Name}}\n{{Address 2}}\n{{City}}', { Name: 'A', 'Address 2': ' \n \t', City: 'C' })).toBe('A\nC');
   });
 
   it('renders an empty template as empty rich text', () => {
