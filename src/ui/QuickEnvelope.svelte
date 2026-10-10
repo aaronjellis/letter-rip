@@ -451,7 +451,10 @@
       </div>
       {#if building || rendering}<p class="updating" aria-live="polite"><LoaderCircle class="spin" size={18} aria-hidden="true" /><span class="updating-label">Updating preview…</span></p>{/if}
       {#if listMode && included.length > 0}
-        <span class="record-caption muted" title={currentCaption}>{currentCaption}</span>
+        <span class="record-caption" title={currentCaption}>
+          <span class="caption-name muted">{currentCaption}</span>
+          <span class="caption-pos" aria-live="polite"><span class="sr-only">Record </span>{index + 1} of {included.length}</span>
+        </span>
       {/if}
     </div>
     <!-- The stage reserves the envelope's shape so the panel does not jump between renders. -->
@@ -508,7 +511,6 @@
               onclick={() => stepRecord(-1)}><ChevronLeft size={18} aria-hidden="true" /></button>
             <button type="button" class="step" aria-label="Next record" title="Next record (→)" disabled={index >= included.length - 1}
               onclick={() => stepRecord(1)}><ChevronRight size={18} aria-hidden="true" /></button>
-            <span class="sr-only" aria-live="polite">Record {index + 1} of {included.length}</span>
           </div>
         {/if}
         <button class="btn btn-secondary btn-download" type="button" aria-label={listMode && dataset ? `Download PDF (${printCount})` : 'Download PDF'}
@@ -762,7 +764,9 @@
   .preview-head > .title-line { flex: none; }
   .updating { flex: none; margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
   /* Current record's caption at the header's right edge. */
-  .record-caption { margin-left: auto; min-width: 0; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .record-caption { margin-left: auto; display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; max-width: 260px; font-size: 14px; white-space: nowrap; }
+  .caption-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .caption-pos { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
   .stepper { display: inline-flex; align-items: center; gap: 4px; flex: none; }
   .step { width: 36px; min-height: 36px; padding: 0; }
   .message :global(.lucide-info) { color: var(--muted); }
