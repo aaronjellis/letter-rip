@@ -507,6 +507,12 @@
     fieldsList?.focus();
   }
 
+  // Keep the active option in view as the keyboard (or pointer) moves through a long list.
+  $effect(() => {
+    if (!fieldsOpen || !fieldsList) return;
+    fieldsList.children[activeField]?.scrollIntoView({ block: 'nearest' });
+  });
+
   function closeFields(returnFocus: boolean) {
     if (!fieldsOpen) return;
     fieldsOpen = false;
@@ -780,6 +786,8 @@
     overflow-y: auto;
     margin: 0;
     padding: 6px;
+    /* scrollIntoView on the active option keeps the list's padding visible. */
+    scroll-padding: 6px;
     list-style: none;
     background: var(--surface);
     border: 1px solid var(--hairline);

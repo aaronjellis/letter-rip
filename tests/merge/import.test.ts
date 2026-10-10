@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   parseDelimited, detectDelimiter, parseWorkbook, detectHeaderRow, transpose, buildDataset,
-  renameColumn, setIncluded, setAllIncluded, setHeaderRow, setTransposed, recordFromRow,
+  renameColumn, setIncluded, setAllIncluded, setHeaderRow, setTransposed, recordFromRow, carryRenames,
   includedCount, ImportError, UNREADABLE_FILE, NO_ROWS, READER_UNAVAILABLE,
 } from '../../src/lib/merge/import';
 import { recordFromRow as renderRecordFromRow, renderTemplate } from '../../src/lib/merge/render';
@@ -346,6 +346,63 @@ describe('dataset edits', () => {
   });
 });
 
+describe('carryRenames', () => {
+  const base = () =>
+    buildDataset(
+      [['Name', 'City', 'Zip'], ['Ada', 'London', '1'], ['Alan', 'Wilmslow', '2']],
+      { sourceName: 'x.csv', headerRow: true, transposed: false },
+    );
+
+  it('keeps a rename across transpose on and off', () => {
+    const renamed = renameColumn(base(), 'c0', 'Full Name');
+    const on = carryRenames(renamed, setTransposed(renamed, true));
+    expect(on.columns[0]).toEqual({ id: 'c0', name: 'Full Name', originalName: 'Name' });
+    const off = carryRenames(on, setTransposed(on, false));
+    expect(off.columns.map((c) => c.name)).toEqual(['Full Name', 'City', 'Zip']);
+    expect(off.columns.map((c) => c.originalName)).toEqual(['Name', 'City', 'Zip']);
+  });
+
+  it('drops a rename whose column no longer exists', () => {
+    const renamed = renameColumn(base(), 'c1', 'Town');
+    const off = carryRenames(renamed, setHeaderRow(renamed, false));
+    expect(off.columns.map((c) => c.name)).toEqual(['Column 1', 'Column 2', 'Column 3']);
+  });
+
+  it('returns next unchanged when nothing was renamed', () => {
+    const ds = base();
+    const next = setTransposed(ds, true);
+    expect(carryRenames(ds, next)).toBe(next);
+  });
+
+  it('keeps swapped names', () => {
+    const swapped = renameColumn(renameColumn(renameColumn(base(), 'c0', 'Tmp'), 'c1', 'Name'), 'c0', 'City');
+    expect(swapped.columns.map((c) => c.name)).toEqual(['City', 'Name', 'Zip']);
+    const rebuilt = setTransposed(setTransposed(swapped, true), false);
+    expect(carryRenames(swapped, rebuilt).columns.map((c) => c.name)).toEqual(['City', 'Name', 'Zip']);
+  });
+
+  it('dedupes a carried name against a column that appears in the rebuild', () => {
+    // Header off: Column 1..3. Rename Column 1 to "Name"; header on brings back a real "Name" column.
+    const off = setHeaderRow(base(), false);
+    const renamed = renameColumn(off, 'c1', 'Name');
+    expect(renamed.columns[1].originalName).toBe('Column 2');
+    const t = carryRenames(renamed, setTransposed(renamed, true));
+    expect(t.columns.find((c) => c.originalName === 'Column 2')?.name).toBe('Name');
+    const on = carryRenames(renamed, buildDataset(renamed.source, {
+      sourceName: 'x.csv', headerRow: false, transposed: false,
+    }));
+    expect(on.columns.map((c) => c.name)).toEqual(['Column 1', 'Name', 'Column 3']);
+  });
+
+  it('does not mutate its inputs', () => {
+    const renamed = renameColumn(base(), 'c0', 'Full Name');
+    const next = setTransposed(renamed, true);
+    const before = structuredClone(next.columns);
+    carryRenames(renamed, next);
+    expect(next.columns).toEqual(before);
+  });
+});
+
 describe('parseWorkbook', () => {
   it('reads every sheet of an XLSX as formatted strings', async () => {
     const { sheets } = await parseWorkbook(fixture('sample.xlsx'));
@@ -414,5 +471,36 @@ describe('parseWorkbook when the reader fails to load', () => {
     expect(err).toBeInstanceOf(fresh.ImportError);
     expect((err as Error).message).toBe(READER_UNAVAILABLE);
     expect((err as Error).cause).toBeInstanceOf(Error);
+  });
+});
+
+describe('parseWorkbook codepage tables', () => {
+  afterEach(() => {
+    vi.doUnmock('xlsx/dist/cpexcel.full.mjs');
+    vi.resetModules();
+  });
+
+  async function withSpy() {
+    vi.resetModules();
+    const loaded = vi.fn();
+    vi.doMock('xlsx/dist/cpexcel.full.mjs', async (importOriginal) => {
+      loaded();
+      return importOriginal();
+    });
+    return { loaded, mod: await import('../../src/lib/merge/import') };
+  }
+
+  it('skips them for .xlsx', async () => {
+    const { loaded, mod } = await withSpy();
+    const { sheets } = await mod.parseWorkbook(fixture('sample.xlsx'));
+    expect(sheets).toHaveLength(2);
+    expect(loaded).not.toHaveBeenCalled();
+  });
+
+  it('loads them for legacy .xls', async () => {
+    const { loaded, mod } = await withSpy();
+    const { sheets } = await mod.parseWorkbook(fixture('sample.xlsx'), { legacy: true });
+    expect(sheets).toHaveLength(2);
+    expect(loaded).toHaveBeenCalledTimes(1);
   });
 });

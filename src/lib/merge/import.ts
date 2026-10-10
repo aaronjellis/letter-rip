@@ -6,7 +6,7 @@
  * so a Svelte `$state` holder can simply be reassigned.
  *
  * Typical flow:
- *   cells = parseDelimited(text)            // or (await parseWorkbook(bytes)).sheets[i].cells
+ *   cells = parseDelimited(text)            // or (await parseWorkbook(bytes, { legacy })).sheets[i].cells
  *   ds = buildDataset(cells, { sourceName, headerRow: detectHeaderRow(cells), transposed: false })
  *   ds = renameColumn(ds, 'c1', 'Town')     // setIncluded, setHeaderRow, setTransposed, ...
  *   record = recordFromRow(ds, r)           // { Name: 'Ada', Town: 'London' }
@@ -206,15 +206,19 @@ export function parseDelimited(text: string, opts: { delimiter?: Delimiter } = {
 // Workbooks
 
 /**
- * Load SheetJS on demand, plus its codepage tables so legacy `.xls` files decode non-ASCII text.
- * The tables are optional: if they fail to load, parsing goes on without them.
+ * Load SheetJS on demand. With `legacy`, also load its codepage tables so legacy `.xls` files
+ * decode non-ASCII text (`.xlsx` is Unicode and never needs them). The tables are optional: if they
+ * fail to load, parsing goes on without them.
  * @throws ImportError with `READER_UNAVAILABLE` when SheetJS itself can't be loaded (for example,
  * offline after a deploy replaced the chunk).
  */
-async function loadReader(): Promise<typeof import('xlsx')> {
-  const [xlsx, cptable] = await Promise.allSettled([import('xlsx'), import('xlsx/dist/cpexcel.full.mjs')]);
+async function loadReader(legacy: boolean): Promise<typeof import('xlsx')> {
+  const [xlsx, cptable] = await Promise.allSettled([
+    import('xlsx'),
+    legacy ? import('xlsx/dist/cpexcel.full.mjs') : Promise.resolve(null),
+  ]);
   if (xlsx.status === 'rejected') throw new ImportError(READER_UNAVAILABLE, { cause: xlsx.reason });
-  if (cptable.status === 'fulfilled') {
+  if (cptable.status === 'fulfilled' && cptable.value) {
     try {
       xlsx.value.set_cptable(cptable.value);
     } catch {
@@ -227,13 +231,15 @@ async function loadReader(): Promise<typeof import('xlsx')> {
 /**
  * Read an Excel (or any SheetJS-supported) workbook. Cells come back as their displayed,
  * formatted strings (`raw: false`), so ZIP codes keep leading zeros and dates keep their format.
- * Sheets with no non-empty cell are left out.
+ * Sheets with no non-empty cell are left out. Pass `legacy: true` for a legacy `.xls` file so its
+ * codepage tables load; other formats skip them.
  * @throws ImportError with `READER_UNAVAILABLE`, `UNREADABLE_FILE`, or `NO_ROWS`.
  */
 export async function parseWorkbook(
   bytes: ArrayBuffer | Uint8Array,
+  opts: { legacy?: boolean } = {},
 ): Promise<{ sheets: { name: string; cells: string[][] }[] }> {
-  const XLSX = await loadReader();
+  const XLSX = await loadReader(opts.legacy ?? false);
   let wb: import('xlsx').WorkBook;
   try {
     wb = XLSX.read(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), {
@@ -431,4 +437,23 @@ export function setHeaderRow(ds: Dataset, on: boolean): Dataset {
  */
 export function setTransposed(ds: Dataset, on: boolean): Dataset {
   return rebuild(ds, { transposed: on });
+}
+
+/**
+ * Carry the user's column names from `prev` onto `next`, a dataset rebuilt from the same source
+ * (header or transpose toggle). Each renamed column in `prev` (`name !== originalName`) passes its
+ * name to the column in `next` with the same `originalName`, if there is one. Names are made unique
+ * as `renameColumn` does, except that carried columns don't block each other (so swapped names
+ * survive). Returns `next` itself when nothing carries over.
+ */
+export function carryRenames(prev: Dataset, next: Dataset): Dataset {
+  const carried = new Map<string, string>();
+  for (const c of prev.columns) if (c.name !== c.originalName) carried.set(c.originalName, c.name);
+  const targets = new Set(next.columns.filter((c) => carried.has(c.originalName)).map((c) => c.id));
+  if (targets.size === 0) return next;
+  const allocate = nameAllocator(next.columns.filter((c) => !targets.has(c.id)).map((c) => c.name));
+  const columns = next.columns.map((c) =>
+    targets.has(c.id) ? { ...c, name: allocate(tokenSafe(carried.get(c.originalName)!) || c.originalName) } : c,
+  );
+  return { ...next, columns };
 }

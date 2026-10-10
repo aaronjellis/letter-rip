@@ -37,6 +37,7 @@
   } = $props();
 
   const id = $props.id();
+  let root = $state<HTMLDivElement>();
   let fileInput = $state<HTMLInputElement>();
   let loading = $state(false);
   let error = $state('');
@@ -46,6 +47,11 @@
   let pasteArea = $state<HTMLTextAreaElement>();
   /** True while a loaded list shows the loader again (Replace list); the old list stays until a new one loads. */
   let replacing = $state(false);
+  /**
+   * Bumped by Cancel and by every new load or removal. A file load that finishes under an older
+   * number was cancelled or superseded, so its result is dropped.
+   */
+  let loadSeq = 0;
 
   // Header rename in place.
   let editingId = $state<string | null>(null);
@@ -73,24 +79,39 @@
   }
 
   async function loadFile(file: File) {
+    const seq = ++loadSeq;
     loading = true;
     error = '';
     try {
       if (WORKBOOK_RE.test(file.name)) {
-        const { sheets: all } = await parseWorkbook(await file.arrayBuffer());
+        const bytes = await file.arrayBuffer();
+        if (seq !== loadSeq) return;
+        // Only legacy .xls needs SheetJS's codepage tables.
+        const { sheets: all } = await parseWorkbook(bytes, { legacy: file.name.toLowerCase().endsWith('.xls') });
+        if (seq !== loadSeq) return;
         for (const s of all) workbookSheets.set(s.cells, all);
         const first = all[0];
         finishLoad(fromCells(first.cells, file.name, { sheetNames: all.map((s) => s.name), activeSheet: first.name }));
       } else if (TEXT_RE.test(file.name) || file.type.startsWith('text/')) {
-        finishLoad(fromCells(parseDelimited(await file.text()), file.name));
+        const text = await file.text();
+        if (seq !== loadSeq) return;
+        finishLoad(fromCells(parseDelimited(text), file.name));
       } else {
         throw new ImportError(UNREADABLE_FILE);
       }
     } catch (err) {
-      error = err instanceof ImportError ? err.message : errorMessage(err);
+      if (seq === loadSeq) error = err instanceof ImportError ? err.message : errorMessage(err);
     } finally {
-      loading = false;
+      if (seq === loadSeq) loading = false;
     }
+  }
+
+  /** Leave Replace list, dropping any load still in flight; the current list stays. */
+  function cancelReplace() {
+    loadSeq++;
+    loading = false;
+    replacing = false;
+    error = '';
   }
 
   function onFilePicked(e: Event) {
@@ -129,7 +150,11 @@
       return;
     }
     try {
-      finishLoad(fromCells(parseDelimited(pasteText), 'Pasted cells'));
+      const ds = fromCells(parseDelimited(pasteText), 'Pasted cells');
+      // A file still loading must not replace the pasted list when it finishes.
+      loadSeq++;
+      loading = false;
+      finishLoad(ds);
     } catch (err) {
       error = err instanceof ImportError ? err.message : errorMessage(err);
     }
@@ -143,6 +168,8 @@
   }
 
   function remove() {
+    loadSeq++;
+    loading = false;
     error = '';
     replacing = false;
     editingId = null;
@@ -164,19 +191,42 @@
     onchange(renameColumn(dataset, colId, draft));
   }
 
+  /** Put focus back on a column's header button once the input has gone. */
+  async function focusHeader(colId: string) {
+    await tick();
+    root?.querySelector<HTMLButtonElement>(`.header-btn[data-col="${colId}"]`)?.focus();
+  }
+
+  // A blur from clicking elsewhere commits without moving focus; only Enter and Escape restore it.
   function onHeaderKeydown(e: KeyboardEvent) {
+    const colId = editingId;
+    if (!colId) return;
     if (e.key === 'Enter') {
       // Commit here rather than submitting the surrounding form (which prints).
       e.preventDefault();
       commitEdit();
+      void focusHeader(colId);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       editingId = null;
+      void focusHeader(colId);
     }
+  }
+
+  /**
+   * Enter in a checkbox would submit the surrounding form, which prints. Text fields handle Enter
+   * themselves (the header input commits; the paste box inserts a line break).
+   */
+  function onPanelKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (t instanceof HTMLInputElement && (t.type === 'checkbox' || t.type === 'radio')) e.preventDefault();
   }
 </script>
 
-<div class="data-panel">
+<!-- Keydown here only stops Enter in a checkbox from submitting the form; it adds no interaction. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="data-panel" bind:this={root} onkeydown={onPanelKeydown}>
   <input bind:this={fileInput} id="{id}-file" class="sr-only" type="file" accept={ACCEPT} onchange={onFilePicked}
     tabindex="-1" aria-hidden="true" />
 
@@ -195,7 +245,7 @@
           <ClipboardPaste size={18} aria-hidden="true" />Paste cells
         </button>
         {#if replacing}
-          <button type="button" class="quiet" onclick={() => { replacing = false; error = ''; }}>
+          <button type="button" class="quiet" onclick={cancelReplace}>
             <X size={18} aria-hidden="true" />Cancel
           </button>
         {/if}
@@ -267,7 +317,7 @@
                   <input bind:this={headerInput} class="header-input" bind:value={draft}
                     aria-label="Column name" onkeydown={onHeaderKeydown} onblur={commitEdit} />
                 {:else}
-                  <button type="button" class="header-btn" class:renamed
+                  <button type="button" class="header-btn" class:renamed data-col={col.id}
                     aria-label="Rename column {col.name}" onclick={() => startEdit(col.id, col.name)}>{col.name}</button>
                 {/if}
               </th>

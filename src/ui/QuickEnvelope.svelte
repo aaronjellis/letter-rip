@@ -6,8 +6,8 @@
   import { createBrowserFontProvider } from '../lib/fonts/loader';
   import { renderPdfPageToCanvas, isRenderCancelled } from '../lib/pdf/preview';
   import { errorMessage } from '../lib/errors';
-  import { includedCount, recordFromRow, type Dataset } from '../lib/merge/import';
-  import { renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
+  import { carryRenames, recordFromRow, type Dataset } from '../lib/merge/import';
+  import { fieldKey, renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
   import DataPanel from './DataPanel.svelte';
   import SizePicker from './SizePicker.svelte';
   import BlockLayoutEditor from './BlockLayoutEditor.svelte';
@@ -51,6 +51,11 @@
   let listWarnings = $state<{ rows: number[]; chars: string[] }>({ rows: [], chars: [] });
   /** True while Print or Download builds the whole list. */
   let exporting = $state(false);
+  /**
+   * Whole-list notes, refreshed by the debounced preview effect rather than on every keystroke:
+   * included rows whose block renders empty, and template fields with no matching column.
+   */
+  let mergeStats = $state.raw<{ skipped: number; unknown: string[] }>({ skipped: 0, unknown: [] });
   // Bytes of the latest preview PDF; also what Download saves.
   let pdfBytes = $state.raw<Uint8Array | null>(null);
   let warnings = $state<EnvelopeWarning[]>([]);
@@ -73,22 +78,6 @@
   /** Dataset row indexes that are included, in order. */
   const included = $derived(dataset ? dataset.included.flatMap((on, i) => (on ? [i] : [])) : []);
   const index = $derived(Math.min(current, Math.max(0, included.length - 1)));
-  /**
-   * One rendered To block per included row, minus rows whose block is empty. `rows[i]` is the
-   * dataset row of `blocks[i]`.
-   */
-  const merged = $derived.by(() => {
-    const blocks: RichText[] = [];
-    const rows: number[] = [];
-    if (!dataset) return { blocks, rows, skipped: 0 };
-    for (const r of included) {
-      const block = renderTemplate(mergeTemplate, recordFromRow(dataset, r));
-      if (isRichEmpty(block)) continue;
-      blocks.push(block);
-      rows.push(r);
-    }
-    return { blocks, rows, skipped: included.length - blocks.length };
-  });
   const currentRow = $derived(included.length > 0 ? included[index] : -1);
   const currentBlock = $derived(
     dataset && currentRow >= 0 ? renderTemplate(mergeTemplate, recordFromRow(dataset, currentRow)) : null,
@@ -96,14 +85,17 @@
   const currentCaption = $derived(
     dataset && currentRow >= 0 ? (dataset.rows[currentRow][0] || `Row ${currentRow + 1}`) : '',
   );
-  const unknown = $derived(dataset ? unknownTokens(mergeTemplate, dataset.columns.map((c) => c.name)) : []);
   const fieldNames = $derived(dataset ? dataset.columns.map((c) => c.name) : []);
 
+  /** Envelopes Print makes, as of the last stats refresh. */
+  const printCount = $derived(Math.max(0, included.length - mergeStats.skipped));
   const hasReturn = $derived(settings.showReturn && !isRichEmpty(settings.returnAddress));
-  // Something prints when either enabled block has text.
+  // Something prints when either enabled block has text. In list mode the rows aren't rendered here
+  // (that would redo the whole list on every keystroke): the count comes from the debounced stats,
+  // and build() still reports a list with no addresses if the stats lag behind.
   const canPrint = $derived(
     listMode
-      ? merged.blocks.length > 0 && (settings.showRecipient || hasReturn)
+      ? !!dataset && included.length > 0 && printCount > 0 && (settings.showRecipient || hasReturn)
       : (settings.showRecipient && !isRichEmpty(recipient)) || hasReturn,
   );
   /** What the preview draws: the single recipient, or the current record. Null when nothing prints. */
@@ -112,7 +104,6 @@
       ? currentBlock && ((settings.showRecipient && !isRichEmpty(currentBlock)) || hasReturn) ? currentBlock : null
       : canPrint ? recipient : null,
   );
-  const printCount = $derived(merged.blocks.length);
   const blankMessage = $derived(
     !settings.showRecipient && !settings.showReturn
       ? 'Turn on From or To to print something.'
@@ -135,10 +126,28 @@
     onsettings({ ...settings, [key]: value });
   }
 
+  /**
+   * Render the template once per included row, in one pass over a plain copy of the template.
+   * Rows whose block is empty are left out; `rows[i]` is the dataset row of `blocks[i]`.
+   */
+  function mergeRows(ds: Dataset, rowIndexes: number[], template: RichText) {
+    const blocks: RichText[] = [];
+    const rows: number[] = [];
+    for (const r of rowIndexes) {
+      const block = renderTemplate(template, recordFromRow(ds, r));
+      if (isRichEmpty(block)) continue;
+      blocks.push(block);
+      rows.push(r);
+    }
+    return { blocks, rows };
+  }
+
   /** Build the PDF for the current inputs: one page, or in list mode one page per included row. */
   async function build() {
     if (!listMode) return buildEnvelopePdf([recipient], settings, fonts);
-    const { blocks, rows } = merged;
+    if (!dataset) throw new Error('Load a list first.');
+    const { blocks, rows } = mergeRows(dataset, included, $state.snapshot(mergeTemplate) as RichText);
+    if (blocks.length === 0) throw new Error('None of the included rows has an address. Check the To template and your list.');
     const result = await buildEnvelopePdf(blocks, settings, fonts);
     const chars = new Set<string>();
     for (const w of result.warnings) for (const c of w.replaced) chars.add(c);
@@ -148,10 +157,13 @@
 
   /**
    * A new list. A column rename (same source, same shape) rewrites matching template tokens so
-   * they follow the column.
+   * they follow the column. A rebuild from the same source (header or transpose toggle) keeps the
+   * user's column names where the column still exists; tokens for a renamed column that's gone
+   * revert to its original name.
    */
-  function onDataset(next: Dataset | null) {
+  function onDataset(incoming: Dataset | null) {
     const prev = dataset;
+    let next = incoming;
     if (prev && next && next.source === prev.source && next.headerRow === prev.headerRow
       && next.transposed === prev.transposed && next.columns.length === prev.columns.length) {
       let template = mergeTemplate;
@@ -160,8 +172,24 @@
         if (old.id === col.id && old.name !== col.name) template = renameTokens(template, old.name, col.name);
       });
       if (template !== mergeTemplate) onmergetemplate(template);
+    } else if (prev && next && next.source === prev.source) {
+      const carried = carryRenames(prev, next);
+      let template = mergeTemplate;
+      for (const old of prev.columns) {
+        if (old.name === old.originalName) continue;
+        const col = carried.columns.find((c) => c.originalName === old.originalName);
+        const to = col ? col.name : old.originalName;
+        if (fieldKey(to) !== fieldKey(old.name)) template = renameTokens(template, old.name, to);
+      }
+      if (template !== mergeTemplate) onmergetemplate(template);
+      next = carried;
+      current = 0;
     } else {
       current = 0;
+    }
+    // A different list or shape: the old skipped count no longer applies (the stats refresh shortly).
+    if (next?.source !== prev?.source || next?.rows.length !== prev?.rows.length) {
+      mergeStats = { skipped: 0, unknown: mergeStats.unknown };
     }
     dataset = next;
   }
@@ -175,16 +203,17 @@
     return URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   }
 
-  // Debounced live preview. Only the synchronous reads of canPrint, recipient,
-  // and settings are tracked; writes inside the timeout do not re-trigger the effect.
-  // A build that finishes after its effect run was cleaned up is discarded, so a
-  // slow, stale build can never overwrite a newer preview.
+  // Debounced live preview, plus the whole-list stats in list mode. Only the synchronous reads
+  // (preview block, settings, template, list) are tracked; writes inside the timeout do not
+  // re-trigger the effect. A build that finishes after its effect run was cleaned up is
+  // discarded, so a slow, stale build can never overwrite a newer preview.
   $effect(() => {
     const block = previewBlock;
     void settings;
     // Full-list warnings describe the last export; any change makes them stale.
-    void mergeTemplate;
-    void dataset;
+    const template = mergeTemplate;
+    const ds = listMode ? dataset : null;
+    const rows = included;
     listWarnings = { rows: [], chars: [] };
     if (!block) {
       pdfBytes = null;
@@ -193,10 +222,18 @@
       returnReplaced = [];
       error = '';
       building = false;
-      return;
     }
     let cancelled = false;
     const timer = setTimeout(async () => {
+      if (ds) {
+        // One pass over every included row, on a plain copy so rendering skips the state proxy.
+        const plain = $state.snapshot(template) as RichText;
+        mergeStats = {
+          skipped: rows.length - mergeRows(ds, rows, plain).blocks.length,
+          unknown: unknownTokens(plain, ds.columns.map((c) => c.name)),
+        };
+      }
+      if (!block) return;
       error = '';
       building = true;
       try {
@@ -383,13 +420,13 @@
           <p class="muted message status-line" aria-live="polite"><TriangleAlert size={18} aria-hidden="true" /><span>Some characters in row {currentRow + 1} are not supported and were replaced with "?": {warnings[0].replaced.join(' ')}</span></p>
         {/if}
         {#if dataset && settings.showRecipient}
-          {#if unknown.length > 0}
-            <p class="muted message status-line"><TriangleAlert size={18} aria-hidden="true" /><span>{unknown.length === 1 ? 'This field isn’t' : 'These fields aren’t'} in your list and will print blank: {unknown.map((u) => `{{${u}}}`).join(', ')}</span></p>
+          {#if mergeStats.unknown.length > 0}
+            <p class="muted message status-line"><TriangleAlert size={18} aria-hidden="true" /><span>{mergeStats.unknown.length === 1 ? 'This field isn’t' : 'These fields aren’t'} in your list and will print blank: {mergeStats.unknown.map((u) => `{{${u}}}`).join(', ')}</span></p>
           {/if}
           {#if included.length === 0}
             <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>No rows included.</span></p>
-          {:else if merged.skipped > 0}
-            <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>{plural(merged.skipped, 'row', 'rows')} skipped: no address</span></p>
+          {:else if mergeStats.skipped > 0}
+            <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>{plural(mergeStats.skipped, 'row', 'rows')} skipped: no address</span></p>
           {/if}
           {#if included.length > LARGE_LIST}
             <p class="muted message status-line"><Info size={18} aria-hidden="true" /><span>{plural(included.length, 'row', 'rows')} included. Making the PDF may take a while.</span></p>
