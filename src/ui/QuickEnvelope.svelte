@@ -519,7 +519,8 @@
         <!-- Outside the form, so it submits it through the form attribute. -->
         <button class="btn btn-primary" type="submit" form="envelope-form" disabled={!canPrint || exporting}>
           {#if exporting}<LoaderCircle class="spin" size={20} aria-hidden="true" />{:else}<Printer size={20} aria-hidden="true" />{/if}
-          {listMode ? (dataset ? `Print ${plural(printCount, 'envelope', 'envelopes')}` : 'Print envelopes') : 'Print envelope'}
+          <span class="btn-label">{listMode ? (dataset ? `Print ${plural(printCount, 'envelope', 'envelopes')}` : 'Print envelopes') : 'Print envelope'}</span>
+          <span class="btn-label-short" aria-hidden="true">{listMode && dataset ? `Print ${printCount}` : 'Print'}</span>
         </button>
       </div>
     </div>
@@ -733,6 +734,7 @@
 
   .action-bar { display: grid; gap: 12px; padding-top: 4px; }
   .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px; }
+  .btn-label-short { display: none; }
   /* Record stepper sits at the bottom left, opposite the primary actions. */
   .actions .stepper { margin-right: auto; }
   .message { margin: 0; font-size: 14px; }
@@ -742,15 +744,17 @@
   /* Preview panel. */
   .preview {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     min-width: 0;
+    overflow: hidden;
     padding: var(--pad);
     background: var(--surface);
     border: 1px solid var(--hairline);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-float);
   }
-  .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; }
+  .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; min-width: 0; }
   .preview-head { flex-wrap: wrap; row-gap: 8px; }
   .updating { margin: 0; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
   /* Current record's caption at the header's right edge. */
@@ -807,12 +811,15 @@
   }
   @media (max-width: 759px) {
     .summary-hint { display: none; }
-    /* Phone: buttons share one row. Download is icon-only; Print takes the rest. */
-    .actions { flex-wrap: nowrap; }
-    .actions .btn-download { flex: none; width: 48px; padding: 0; justify-content: center; }
+    /* Phone: buttons share one row. Download is icon-only; Print takes the rest and may truncate. */
+    .actions { flex-wrap: nowrap; gap: 8px; min-width: 0; }
+    .actions > * { min-width: 0; }
+    .actions .stepper { flex: none; gap: 4px; margin-right: auto; }
+    .actions .btn-download { flex: none; width: 44px; padding: 0; justify-content: center; }
     .actions .btn-download .btn-label { display: none; }
-    .actions .btn-primary { flex: 1 1 auto; min-width: 0; }
-    .actions .stepper { width: auto; margin-right: auto; }
+    .actions .btn-primary { flex: 1 1 0; min-width: 0; padding: 0 16px; }
+    .actions .btn-primary .btn-label { display: none; }
+    .actions .btn-primary .btn-label-short { display: inline; white-space: nowrap; }
     /* Phone: the mode choice stretches full width; the list chip gets its own row. */
     .mode-bar { flex-direction: column; align-items: stretch; }
     .segmented.mode { display: grid; grid-template-columns: 1fr 1fr; }
