@@ -771,8 +771,6 @@
   /* Medium: preview full width on top, From and To side by side below it. */
   @media (min-width: 760px) and (max-width: 1179px) {
     .form { grid-template-columns: 1fr 1fr; gap: 24px; }
-    /* The list needs room: in list mode To takes the full width under From. */
-    .form.list .to-card { grid-column: 1 / -1; }
   }
   /* Wide: form left, a larger sticky preview right. */
   @media (min-width: 1180px) {
