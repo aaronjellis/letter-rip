@@ -26,8 +26,8 @@
 </script>
 
 <div class="paper-controls">
-  <div class="field">
-    <label class="caption" for="{id}-paper">Printer paper</label>
+  <div class="field paper">
+    <label class="caption" for="{id}-paper">Paper</label>
     <select id="{id}-paper" value={settings.paper.kind} onchange={onPaper}>
       <option value="envelope">Envelope size</option>
       <option value="letter">Letter</option>
@@ -63,12 +63,18 @@
 </div>
 
 <style>
-  .paper-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 20px; min-width: 0; }
-  .field { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+  .paper-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 16px; min-width: 0; }
+  .field { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  /* Tablet and up: one line; the select shrinks before anything wraps. */
+  @media (min-width: 760px) {
+    .paper-controls { flex-wrap: nowrap; }
+    .field.paper { flex: 0 1 auto; min-width: 0; }
+    .field.paper select { flex: 1 1 120px; max-width: 170px; }
+  }
   .caption { font-size: 14px; font-weight: 500; color: var(--muted); white-space: nowrap; }
   select { min-height: 40px; padding-top: 6px; padding-bottom: 6px; font-size: 14px; min-width: 0; }
   .segmented { flex: none; }
-  .segmented button { min-height: 32px; padding: 0 10px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .segmented button { min-height: 32px; padding: 0 9px; font-size: 14px; font-variant-numeric: tabular-nums; }
   .segmented .icon-only { width: 36px; padding: 0; }
 
   /* Phone: each control takes a full row, caption on the left and control on the right. */
