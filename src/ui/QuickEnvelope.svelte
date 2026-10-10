@@ -25,6 +25,8 @@
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
   import User from '@lucide/svelte/icons/user';
   import Table from '@lucide/svelte/icons/table';
+  import Pencil from '@lucide/svelte/icons/pencil';
+  import X from '@lucide/svelte/icons/x';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import ChevronsLeft from '@lucide/svelte/icons/chevrons-left';
@@ -408,6 +410,40 @@
   <SizePicker {settings} onchange={onsettings} />
 </div>
 
+<!-- What we're printing: one envelope, or one per row of a list. Spans both cards so From and To stay alike. -->
+<div class="mode-bar rise" style="--i: 2">
+  <div class="segmented mode" role="group" aria-label="What to print">
+    <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
+      <User size={16} aria-hidden="true" />One envelope
+    </button>
+    <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
+      <Table size={16} aria-hidden="true" />Many from a list
+    </button>
+  </div>
+  {#if listMode}
+    <!-- The list summary is one pill button that opens the list dialog, plus a small remove button. -->
+    <div class="list-chip-row">
+      <button type="button" class="list-chip" aria-haspopup="dialog" bind:this={stripEdit}
+        title={dataset ? 'Edit list' : 'Load list'} onclick={(e) => listDialog?.open(e.currentTarget)}>
+        <Table size={16} aria-hidden="true" />
+        {#if dataset}
+          <span class="chip-name">{dataset.sourceName}</span>
+          <span class="chip-count"><span aria-hidden="true">·</span><span class="sr-only">,</span> {listSummary}</span>
+          <Pencil size={14} aria-hidden="true" class="chip-edit" />
+          <span class="sr-only">. Edit list</span>
+        {:else}
+          Load list
+        {/if}
+      </button>
+      {#if dataset}
+        <button type="button" class="chip-remove" aria-label="Remove list" title="Remove list" onclick={removeList}>
+          <X size={16} aria-hidden="true" />
+        </button>
+      {/if}
+    </div>
+  {/if}
+</div>
+
 <section class="quick">
   <div class="preview rise" style="--i: 2" bind:this={panel}>
     <div class="preview-head">
@@ -495,36 +531,6 @@
   </div>
 
   <form class="form" class:list={listMode} id="envelope-form" onsubmit={(e) => { e.preventDefault(); print(); }}>
-    <!-- What we're printing: one envelope, or one per row of a list. Spans both cards so From and To stay alike. -->
-    <div class="mode-bar rise" style="--i: 2">
-      <div class="segmented mode" role="group" aria-label="What to print">
-        <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
-          <User size={16} aria-hidden="true" />One envelope
-        </button>
-        <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
-          <Table size={16} aria-hidden="true" />Many from a list
-        </button>
-      </div>
-      {#if listMode}
-        <div class="list-strip">
-          <p class="strip-text">
-            {#if dataset}
-              <span class="strip-name" title={dataset.sourceName}>{dataset.sourceName}</span>
-              <span class="strip-count"><span aria-hidden="true">&nbsp;·&nbsp;</span><span class="sr-only">, </span>{listSummary}</span>
-            {:else}
-              <span class="strip-empty">No list loaded</span>
-            {/if}
-          </p>
-          <div class="strip-actions">
-            <button type="button" class="strip-edit" aria-haspopup="dialog" bind:this={stripEdit}
-              onclick={(e) => listDialog?.open(e.currentTarget)}>{dataset ? 'Edit list' : 'Load list'}</button>
-            {#if dataset}
-              <button type="button" class="strip-remove" onclick={removeList}>Remove</button>
-            {/if}
-          </div>
-        </div>
-      {/if}
-    </div>
     <section class="card rise" style="--i: 3" aria-labelledby="from-title" data-ph-capture-attribute-block="from">
       <div class="card-head with-helper">
         <House size={20} aria-hidden="true" class="head-icon" />
@@ -654,31 +660,26 @@
   .off-note strong { font-weight: 600; color: var(--text); }
 
   /* List strip: icon, source · count, then Edit list and Remove, on one line at desktop. */
-  .list-strip {
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    margin-left: auto;
+  /* List chip: same 36px height as the mode control, so the bar reads as one row. */
+  .list-chip-row { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; }
+  .list-chip {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 40px; max-width: min(100%, 420px);
+    padding: 0 12px 0 10px; border-radius: 999px; font-size: 14px; font-weight: 500;
   }
-  .strip-actions { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-  .strip-text { display: flex; align-items: baseline; flex: 0 1 auto; min-width: 0; margin: 0; font-size: 14px; white-space: nowrap; }
-  .strip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text); }
-  .strip-count { flex: none; font-size: 13px; color: var(--muted); }
-  .strip-empty { color: var(--muted); }
-  .strip-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
-  .strip-edit { min-height: 34px; padding: 0 12px; font-size: 13px; }
-  .strip-remove { min-height: 34px; padding: 0 8px; font-size: 13px; border-color: transparent; background: transparent; color: var(--muted); }
-  .strip-remove:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
+  .list-chip > :global(.lucide) { color: var(--muted); flex: none; }
+  .chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .chip-count { white-space: nowrap; color: var(--muted); font-weight: 500; }
+  .list-chip :global(.chip-edit) { margin-left: 2px; }
+  .chip-remove { width: 40px; min-height: 40px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); border-radius: 999px; }
+  .chip-remove:hover:not(:disabled) { background: var(--hover); color: var(--text); border-color: transparent; }
 
   /* Print switch at the right edge of the card header, centered on the title. */
   .print-toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
   /* To header: the Single | From a list toggle sits left of Print and wraps under the title when narrow. */
   /* Mode bar above the cards: the choice on the left, the list summary on the right. */
-  .mode-bar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; min-width: 0; }
+  .mode-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; min-width: 0; }
   .segmented.mode { padding: 3px; gap: 3px; }
-  .segmented.mode button { min-height: 36px; padding: 0 14px; gap: 8px; font-size: 14px; }
+  .segmented.mode button { min-height: 32px; padding: 0 14px; gap: 8px; font-size: 14px; }
   .print-caption { font-size: 14px; font-weight: 500; color: var(--muted); }
   .switch {
     position: relative;
