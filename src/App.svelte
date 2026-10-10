@@ -49,15 +49,8 @@
   <QuickEnvelope settings={profile.envelope} onsettings={(s) => (profile = { ...profile, envelope: s })}
     mergeTemplate={profile.mergeTemplate} onmergetemplate={(t) => (profile = { ...profile, mergeTemplate: t })} />
 
+  <!-- One row, evenly spaced: the sibling-tool card, About, Support. Shared .promo-card styles live in app.css. -->
   <footer class="footnote">
-    <div class="footnote-links">
-      <button type="button" class="text-link" onclick={openAbout}>About Letter Rip</button>
-      <a class="coffee" href="https://buymeacoffee.com/madebyaaron" target="_blank" rel="noopener">
-        <Coffee size={18} aria-hidden="true" />
-        Support my experiments
-      </a>
-    </div>
-    <!-- Cross-promo for the sibling tool. Shared .promo-card styles live in app.css. -->
     <a class="promo-card" href="https://labs.aaronjellis.com/hard-copy/">
       <span class="promo-icon"><Table size={18} aria-hidden="true" /></span>
       <span class="promo-text">
@@ -65,6 +58,11 @@
         <span class="promo-sub">Try Hard Copy, my spreadsheet printing utility.</span>
       </span>
       <ArrowRight size={18} aria-hidden="true" class="promo-arrow" />
+    </a>
+    <button type="button" class="text-link" onclick={openAbout}>About Letter Rip</button>
+    <a class="coffee" href="https://buymeacoffee.com/madebyaaron" target="_blank" rel="noopener">
+      <Coffee size={18} aria-hidden="true" />
+      Support my experiments
     </a>
   </footer>
 
@@ -110,12 +108,15 @@
     border-top: 1px solid var(--divider);
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 16px;
+    justify-content: space-between;
+    gap: 16px 24px;
     flex-wrap: wrap;
   }
-  /* The promo card takes its own full row under the links. */
-  .footnote :global(.promo-card) { flex-basis: 100%; margin-top: 8px; }
+  /* The card leads the row and gives way first; on phones it takes its own row with the links spread below. */
+  .footnote :global(.promo-card) { flex: 0 1 520px; width: auto; }
+  @media (max-width: 759px) {
+    .footnote :global(.promo-card) { flex-basis: 100%; max-width: none; }
+  }
   /* Support link: quiet outlined pill in the app's own system, no third-party script. */
   .coffee {
     display: inline-flex;
@@ -134,7 +135,6 @@
   .coffee:hover { background: var(--subtle); }
   .coffee:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
   .coffee :global(.lucide) { color: var(--coral-icon); }
-  .footnote-links { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
   /* Opens the About dialog: a plain text link, not another pill. */
   .text-link {
     min-height: 40px;
