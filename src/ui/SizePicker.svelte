@@ -108,6 +108,12 @@
   .custom .segmented { height: 48px; align-items: center; }
   .hint { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 14px; }
 
+  /* Phone: Width and Height share the row and the unit toggle drops below, so a value like 104.8 fits. */
+  @media (max-width: 480px) {
+    .custom { grid-template-columns: 1fr 1fr; }
+    .custom .segmented { grid-column: 1 / -1; justify-self: start; }
+  }
+
   /* Desktop: one header row, title on the left and the select at the right edge (like the print
      switches). Custom fields appear on a second row, right-aligned under the select. */
   @media (min-width: 760px) {
