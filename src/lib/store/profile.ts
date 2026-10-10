@@ -5,7 +5,7 @@ import {
 } from '../envelopes/layout';
 import type { FontRef } from '../fonts/types';
 import { getBundledFont } from '../fonts/catalog';
-import { normalizeRich, parseRichText, plainToRich } from '../richtext';
+import { normalizeRich, parseRichText, plainToRich, type RichText } from '../richtext';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -20,7 +20,14 @@ export type LabelSettings = {
 
 export type LetterTemplate = { id: string; name: string; html: string };
 
+/**
+ * Version 3 files may lack `mergeTemplate` (it was added without a version bump); they get the
+ * default template, as do migrated version 1 and 2 files.
+ */
 export const PROFILE_VERSION = 3;
+
+/** The merge template a new profile starts with. */
+const DEFAULT_MERGE_TEMPLATE = '{{Name}}\n{{Address}}\n{{City}}, {{State}} {{Zip}}';
 
 export type Profile = {
   version: typeof PROFILE_VERSION;
@@ -28,6 +35,8 @@ export type Profile = {
   envelope: EnvelopeSettings;
   label: LabelSettings;
   letters: LetterTemplate[];
+  /** The recipient block for mail merge, with `{{Field}}` tokens. */
+  mergeTemplate: RichText;
   theme: ThemePreference;
 };
 
@@ -77,6 +86,7 @@ export function defaultProfile(): Profile {
     },
     label: { product: '5160', startAt: 1, font: 'sans', fontSize: 10 },
     letters: [],
+    mergeTemplate: normalizeRich(plainToRich(DEFAULT_MERGE_TEMPLATE)),
     theme: 'system',
   };
 }
@@ -108,6 +118,7 @@ export function serializeProfile(profile: Profile): string {
 /**
  * Parse an exported layout file. Older versions migrate step by step: 1 → 2 → 3.
  * Missing sections fall back to defaults; invalid fields fall back one at a time.
+ * A missing `mergeTemplate` gets the default; one that is present is validated as rich text.
  */
 export function parseProfile(text: string): Profile {
   let data: unknown;
@@ -134,6 +145,7 @@ export function parseProfile(text: string): Profile {
     envelope: isObj(obj.envelope) ? parseEnvelope(obj.envelope, d.envelope) : d.envelope,
     label: isObj(obj.label) ? parseLabel(obj.label, d.label) : d.label,
     letters: Array.isArray(obj.letters) ? obj.letters.filter(isLetter) : d.letters,
+    mergeTemplate: obj.mergeTemplate === undefined ? d.mergeTemplate : parseRichText(obj.mergeTemplate),
     theme: obj.theme === 'light' || obj.theme === 'dark' ? obj.theme : 'system',
   };
 }

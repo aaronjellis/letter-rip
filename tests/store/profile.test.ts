@@ -381,3 +381,75 @@ describe('clampOffset', () => {
     expect(clampOffset(undefined)).toBe(0);
   });
 });
+
+describe('profile merge template', () => {
+  const defaultTemplate: RichText = {
+    lines: [
+      { runs: [{ text: '{{Name}}' }] },
+      { runs: [{ text: '{{Address}}' }] },
+      { runs: [{ text: '{{City}}, {{State}} {{Zip}}' }] },
+    ],
+  };
+
+  it('defaults to a name and address template', () => {
+    expect(defaultProfile().mergeTemplate).toEqual(defaultTemplate);
+  });
+
+  it('gives each default profile its own template', () => {
+    const a = defaultProfile();
+    a.mergeTemplate.lines[0].runs[0].text = 'changed';
+    expect(defaultProfile().mergeTemplate).toEqual(defaultTemplate);
+  });
+
+  it('uses the default for a version 3 file without a merge template', () => {
+    const p = parseProfile(JSON.stringify({ version: 3, theme: 'dark' }));
+    expect(p.version).toBe(3);
+    expect(p.mergeTemplate).toEqual(defaultTemplate);
+  });
+
+  it('uses the default when migrating version 1 and 2 files', () => {
+    expect(parseProfile(JSON.stringify({ version: 1 })).mergeTemplate).toEqual(defaultTemplate);
+    expect(parseProfile(JSON.stringify({ version: 2, envelope: { returnAddress: 'X' } })).mergeTemplate)
+      .toEqual(defaultTemplate);
+  });
+
+  it('keeps a valid styled template', () => {
+    const mergeTemplate: RichText = {
+      lines: [
+        { runs: [{ text: '{{First Name}} ', bold: true }, { text: '{{Last Name}}', italic: true }], size: 16 },
+        { runs: [] },
+        { runs: [{ text: 'Attn: {{Contact}}' }] },
+      ],
+    };
+    const p = parseProfile(JSON.stringify({ version: 3, mergeTemplate }));
+    expect(p.mergeTemplate).toEqual(mergeTemplate);
+  });
+
+  it('validates the template like other rich text', () => {
+    const p = parseProfile(JSON.stringify({
+      version: 3,
+      mergeTemplate: {
+        lines: [
+          { runs: [{ text: '{{Name}}', bold: false, color: 'red' }, { text: 5 }], size: 400 },
+          'nope',
+          { runs: [{ text: '{{Zip}}', italic: 'yes' }] },
+        ],
+      },
+    }));
+    expect(p.mergeTemplate).toEqual({ lines: [{ runs: [{ text: '{{Name}}' }], size: 72 }, { runs: [] }] });
+  });
+
+  it('treats a non-rich-text template as empty', () => {
+    expect(parseProfile(JSON.stringify({ version: 3, mergeTemplate: '{{Name}}' })).mergeTemplate).toEqual({ lines: [] });
+    expect(parseProfile(JSON.stringify({ version: 3, mergeTemplate: null })).mergeTemplate).toEqual({ lines: [] });
+  });
+
+  it('round-trips through save and load and through export', () => {
+    const p = defaultProfile();
+    p.mergeTemplate = { lines: [{ runs: [{ text: 'Dear ' }, { text: '{{Name}}', bold: true }], size: 12 }] };
+    const s = memoryStorage();
+    saveProfile(p, s);
+    expect(loadProfile(s)).toEqual(p);
+    expect(parseProfile(serializeProfile(p))).toEqual(p);
+  });
+});
