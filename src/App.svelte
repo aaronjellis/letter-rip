@@ -50,7 +50,7 @@
   <QuickEnvelope settings={profile.envelope} onsettings={(s) => (profile = { ...profile, envelope: s })}
     mergeTemplate={profile.mergeTemplate} onmergetemplate={(t) => (profile = { ...profile, mergeTemplate: t })} />
 
-  <!-- Three matching cards: the sibling tool, About, and Support. Shared .promo-card styles live in app.css. -->
+  <!-- Three matching cards: the sibling tool, then quieter About and Support. Shared .promo-card styles live in app.css. -->
   <footer class="footnote">
     <a class="promo-card" href="https://labs.aaronjellis.com/hard-copy/">
       <span class="promo-icon"><Table size={18} aria-hidden="true" /></span>
@@ -60,20 +60,14 @@
       </span>
       <ArrowRight size={18} aria-hidden="true" class="promo-arrow" />
     </a>
-    <button type="button" class="promo-card" onclick={openAbout}>
+    <button type="button" class="promo-card quiet" onclick={openAbout}>
       <span class="promo-icon"><Info size={18} aria-hidden="true" /></span>
-      <span class="promo-text">
-        <span class="promo-title">About Letter Rip</span>
-        <span class="promo-sub">What it does, and how your data stays on your device.</span>
-      </span>
+      <span class="promo-text"><span class="promo-title">About Letter Rip</span></span>
       <ArrowRight size={18} aria-hidden="true" class="promo-arrow" />
     </button>
-    <a class="promo-card" href="https://buymeacoffee.com/madebyaaron" target="_blank" rel="noopener">
+    <a class="promo-card quiet" href="https://buymeacoffee.com/madebyaaron" target="_blank" rel="noopener">
       <span class="promo-icon coral"><Coffee size={18} aria-hidden="true" /></span>
-      <span class="promo-text">
-        <span class="promo-title">Support my experiments</span>
-        <span class="promo-sub">Buy me a coffee if this saved you some time.</span>
-      </span>
+      <span class="promo-text"><span class="promo-title">Support my experiments</span></span>
       <ArrowUpRight size={18} aria-hidden="true" class="promo-arrow" />
     </a>
   </footer>

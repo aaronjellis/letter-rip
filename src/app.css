@@ -357,6 +357,10 @@ html.dialog-open { overflow: hidden; }
 .promo-card:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .promo-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; background: var(--subtle); color: var(--muted); }
 .promo-icon.coral { color: var(--coral-icon); }
+/* About and Support: the same card, a step quieter (tinted, no shadow) with the icon on the surface instead. */
+.promo-card.quiet { background: var(--subtle); box-shadow: none; }
+.promo-card.quiet:hover:not(:disabled) { background: var(--hover); border-color: var(--hairline); box-shadow: none; }
+.promo-card.quiet .promo-icon { background: var(--surface); }
 .promo-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .promo-title { font-weight: 600; font-size: 15px; line-height: 1.3; }
 .promo-sub { font-size: 14px; line-height: 1.3; color: var(--muted); }
