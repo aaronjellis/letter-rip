@@ -18,7 +18,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import {
-    ImportError, UNREADABLE_FILE, buildDataset, detectHeaderRow, includedCount, parseDelimited, parseWorkbook,
+    ImportError, UNREADABLE_FILE, buildDataset, detectHeaderRow, parseDelimited, parseWorkbook,
     renameColumn, setAllIncluded, setHeaderRow, setIncluded, setTransposed, type Dataset,
   } from '../lib/merge/import';
   import { errorMessage } from '../lib/errors';
@@ -59,7 +59,6 @@
   let headerInput = $state<HTMLInputElement>();
 
   const sheets = $derived(dataset ? workbookSheets.get(dataset.source) ?? null : null);
-  const count = $derived(dataset ? includedCount(dataset) : 0);
   const shownRows = $derived(dataset ? dataset.rows.slice(0, MAX_SHOWN) : []);
   const showLoader = $derived(!dataset || replacing);
 
@@ -167,13 +166,24 @@
     finishLoad(fromCells(sheet.cells, dataset.sourceName, { sheetNames: dataset.sheetNames, activeSheet: name }));
   }
 
-  function remove() {
+  /** Drop the list. Also cancels any load in flight, so a late file can't bring a list back. */
+  export function remove() {
     loadSeq++;
     loading = false;
     error = '';
     replacing = false;
     editingId = null;
     onchange(null);
+  }
+
+  /**
+   * Called when the dialog closes: leave an idle Replace list so Edit list reopens on the table.
+   * A file still loading keeps going and lands when it finishes.
+   */
+  export function settle() {
+    if (loading) return;
+    replacing = false;
+    error = '';
   }
 
   async function startEdit(colId: string, name: string) {
@@ -202,7 +212,7 @@
     const colId = editingId;
     if (!colId) return;
     if (e.key === 'Enter') {
-      // Commit here rather than submitting the surrounding form (which prints).
+      // Commit and keep focus in the table.
       e.preventDefault();
       commitEdit();
       void focusHeader(colId);
@@ -212,21 +222,10 @@
       void focusHeader(colId);
     }
   }
-
-  /**
-   * Enter in a checkbox would submit the surrounding form, which prints. Text fields handle Enter
-   * themselves (the header input commits; the paste box inserts a line break).
-   */
-  function onPanelKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Enter') return;
-    const t = e.target;
-    if (t instanceof HTMLInputElement && (t.type === 'checkbox' || t.type === 'radio')) e.preventDefault();
-  }
 </script>
 
-<!-- Keydown here only stops Enter in a checkbox from submitting the form; it adds no interaction. -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="data-panel" bind:this={root} onkeydown={onPanelKeydown}>
+<!-- Rendered in ListDialog, outside the envelope form, so Enter here never prints. -->
+<div class="data-panel" bind:this={root}>
   <input bind:this={fileInput} id="{id}-file" class="sr-only" type="file" accept={ACCEPT} onchange={onFilePicked}
     tabindex="-1" aria-hidden="true" />
 
@@ -294,7 +293,6 @@
         <button type="button" onclick={() => dataset && onchange(setAllIncluded(dataset, true))}>Select all</button>
         <button type="button" onclick={() => dataset && onchange(setAllIncluded(dataset, false))}>Clear</button>
       </div>
-      <p class="count" aria-live="polite">{count} of {dataset.rows.length} {dataset.rows.length === 1 ? 'row' : 'rows'} included</p>
       <div class="list-actions">
         <button type="button" class="quiet" onclick={() => { replacing = true; error = ''; }}>
           <RefreshCw size={16} aria-hidden="true" />Replace list
@@ -391,7 +389,6 @@
   .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
   .toggle { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-soft); }
   .controls .segmented button { min-height: 30px; padding: 0 12px; font-size: 13px; }
-  .count { margin: 0; font-size: 14px; color: var(--muted); }
   .list-actions { display: flex; gap: 4px; margin-left: auto; }
   .list-actions button { min-height: 36px; padding: 0 10px; font-size: 13px; }
 
@@ -425,9 +422,9 @@
   .switch[aria-checked='true']:hover:not(:disabled) { background: var(--coral); }
   .switch[aria-checked='true']::after { transform: translateX(18px); }
 
-  /* The table scrolls inside its own frame in both directions; the page never does. */
+  /* The table scrolls inside its own frame in both directions; the dialog body never has to. */
   .table-wrap {
-    max-height: 280px;
+    max-height: 50vh;
     overflow: auto;
     min-width: 0;
     border: 1px solid var(--divider);

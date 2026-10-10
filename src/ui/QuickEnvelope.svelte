@@ -6,9 +6,9 @@
   import { createBrowserFontProvider } from '../lib/fonts/loader';
   import { renderPdfPageToCanvas, isRenderCancelled } from '../lib/pdf/preview';
   import { errorMessage } from '../lib/errors';
-  import { carryRenames, recordFromRow, type Dataset } from '../lib/merge/import';
+  import { carryRenames, includedCount, recordFromRow, type Dataset } from '../lib/merge/import';
   import { fieldKey, renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
-  import DataPanel from './DataPanel.svelte';
+  import ListDialog from './ListDialog.svelte';
   import SizePicker from './SizePicker.svelte';
   import BlockLayoutEditor from './BlockLayoutEditor.svelte';
   import AddressEditor from './AddressEditor.svelte';
@@ -70,6 +70,8 @@
   let panel = $state<HTMLDivElement>();
   let stage = $state<HTMLDivElement>();
   let canvas = $state<HTMLCanvasElement>();
+  let listDialog = $state<ReturnType<typeof ListDialog>>();
+  let stripEdit = $state<HTMLButtonElement>();
   // Blob URLs handed to print tabs and downloads. Not reactive: only used for cleanup.
   let lastPrintUrl = '';
   const downloadUrls = new Set<string>();
@@ -86,6 +88,9 @@
     dataset && currentRow >= 0 ? (dataset.rows[currentRow][0] || `Row ${currentRow + 1}`) : '',
   );
   const fieldNames = $derived(dataset ? dataset.columns.map((c) => c.name) : []);
+  const listSummary = $derived(
+    dataset ? `${includedCount(dataset)} of ${dataset.rows.length} ${dataset.rows.length === 1 ? 'row' : 'rows'} included` : '',
+  );
 
   /** Envelopes Print makes, as of the last stats refresh. */
   const printCount = $derived(Math.max(0, included.length - mergeStats.skipped));
@@ -192,6 +197,20 @@
       mergeStats = { skipped: 0, unknown: mergeStats.unknown };
     }
     dataset = next;
+  }
+
+  /** Switch To to From a list; with no list yet, open the list dialog on the loader. */
+  function chooseListMode(e: MouseEvent) {
+    if (toMode === 'list') return;
+    toMode = 'list';
+    if (!dataset) void listDialog?.open(e.currentTarget as HTMLElement);
+  }
+
+  /** Drop the list from the strip. No confirm: loading the file again brings it back. */
+  function removeList() {
+    listDialog?.remove();
+    // The Remove button goes away; keep focus on the strip.
+    stripEdit?.focus();
   }
 
   function stepRecord(delta: number) {
@@ -497,7 +516,7 @@
             <button type="button" aria-pressed={toMode === 'single'} onclick={() => (toMode = 'single')}>
               <User size={16} aria-hidden="true" />Single
             </button>
-            <button type="button" aria-pressed={toMode === 'list'} onclick={() => (toMode = 'list')}>
+            <button type="button" aria-pressed={toMode === 'list'} onclick={chooseListMode}>
               <Table size={16} aria-hidden="true" />From a list
             </button>
           </div>
@@ -514,7 +533,25 @@
       {#if !settings.showRecipient}<p class="muted off-note">This address won't print until you turn <strong>Print</strong> on.</p>{/if}
       <div class="card-body" class:off={!settings.showRecipient}>
         {#if listMode}
-          <DataPanel {dataset} onchange={onDataset} />
+          <!-- One-line summary of the list; loading and editing happen in ListDialog. -->
+          <div class="list-strip">
+            <Table size={18} aria-hidden="true" />
+            <p class="strip-text">
+              {#if dataset}
+                <span class="strip-name" title={dataset.sourceName}>{dataset.sourceName}</span>
+                <span class="strip-count"><span aria-hidden="true">&nbsp;·&nbsp;</span><span class="sr-only">, </span>{listSummary}</span>
+              {:else}
+                <span class="strip-empty">No list loaded</span>
+              {/if}
+            </p>
+            <div class="strip-actions">
+              <button type="button" class="strip-edit" aria-haspopup="dialog" bind:this={stripEdit}
+                onclick={(e) => listDialog?.open(e.currentTarget)}>{dataset ? 'Edit list' : 'Load list'}</button>
+              {#if dataset}
+                <button type="button" class="strip-remove" onclick={removeList}>Remove</button>
+              {/if}
+            </div>
+          </div>
           <AddressEditor label="To: address template" value={mergeTemplate}
             onchange={onmergetemplate} fields={fieldNames}
             layout={settings.recipientLayout} onlayout={(l) => update('recipientLayout', l)}
@@ -546,6 +583,9 @@
   </form>
 </section>
 </div>
+
+<!-- Outside the form, so Enter in the list's controls never submits it (which prints). -->
+<ListDialog bind:this={listDialog} {dataset} onchange={onDataset} />
 
 <style>
   /*
@@ -582,6 +622,28 @@
   .card-body.off { opacity: 0.6; }
   .off-note { margin: 0; font-size: 14px; }
   .off-note strong { font-weight: 600; color: var(--text); }
+
+  /* List strip: icon, source · count, then Edit list and Remove, on one line at desktop. */
+  .list-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 6px 6px 6px 12px;
+    background: var(--subtle);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius);
+  }
+  .list-strip > :global(.lucide) { color: var(--muted); }
+  .strip-text { display: flex; align-items: baseline; flex: 1 1 160px; min-width: 0; margin: 0; font-size: 14px; white-space: nowrap; }
+  .strip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text); }
+  .strip-count { flex: none; font-size: 13px; color: var(--muted); }
+  .strip-empty { color: var(--muted); }
+  .strip-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+  .strip-edit { min-height: 34px; padding: 0 12px; font-size: 13px; }
+  .strip-remove { min-height: 34px; padding: 0 8px; font-size: 13px; border-color: transparent; background: transparent; color: var(--muted); }
+  .strip-remove:hover:not(:disabled) { background: var(--hover); border-color: transparent; color: var(--text); }
 
   /* Print switch at the right edge of the card header, centered on the title. */
   .print-toggle { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
