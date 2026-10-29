@@ -5,6 +5,7 @@
   import { createBrowserFontProvider } from '../lib/fonts/loader';
   import { renderPdfPageToCanvas, isRenderCancelled } from '../lib/pdf/preview';
   import { DEFAULT_PRINT_DPI, MAX_PRINT_PAGES, PrintTooLongError, fillPrintWindow, openPrintWindow, renderPdfPagesToDataUrls } from '../lib/pdf/print-window';
+  import { reportExport } from '../lib/labs';
   import { errorMessage } from '../lib/errors';
   import { carryRenames, includedCount, recordFromRow, type Dataset } from '../lib/merge/import';
   import { fieldKey, renameTokens, renderTemplate, unknownTokens } from '../lib/merge/render';
@@ -379,6 +380,7 @@
     a.href = url;
     a.download = listMode ? 'envelopes.pdf' : 'envelope.pdf';
     a.click();
+    reportExport();
     // The browser reads the blob asynchronously; release it once the download has started.
     setTimeout(() => {
       URL.revokeObjectURL(url);
@@ -458,6 +460,7 @@
       error = errorMessage(err);
     } finally {
       exporting = false;
+      if (!error) reportExport();
     }
   }
 
